@@ -231,7 +231,6 @@ export function CodexInspectionPage() {
       void promise
         .then((nextResult) => {
           if (activeSessionIdRef.current !== sessionId) return;
-          const nextActionableResults = nextResult.results.filter(isSuggestedAction);
           const nextAutoExecutableResults = nextResult.results.filter(isAutoExecutableAction);
           setResult(nextResult);
           setProgress(session.getProgress());

@@ -1,0 +1,10 @@
+[Unit]
+Description=CLIProxyAPI Codex account inspection
+After=network-online.target cliproxyapi.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/cliproxyapi/codex-inspection.env
+ExecStart=/usr/bin/python3 /root/cliproxyapi/tools/codex-inspection/codex_inspect.py
+

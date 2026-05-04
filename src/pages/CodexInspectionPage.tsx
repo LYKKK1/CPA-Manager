@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -10,7 +9,6 @@ import { usageServiceApi, type CodexInspectionServerStatus } from '@/services/ap
 import {
   IconChevronDown,
   IconChevronUp,
-  IconExternalLink,
   IconShield,
 } from '@/components/ui/icons';
 import {
@@ -751,10 +749,6 @@ export function CodexInspectionPage() {
           </div>
 
           <div className={styles.heroActions}>
-            <Link to="/monitoring" className={styles.backLink}>
-              <IconExternalLink size={14} />
-              <span>{t('monitoring.codex_inspection_back')}</span>
-            </Link>
             <Button
               variant="secondary"
               onClick={openSettingsModal}

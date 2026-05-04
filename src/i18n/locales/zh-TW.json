@@ -115,7 +115,7 @@
     "auth_files": "驗證檔案",
     "oauth": "OAuth 登入",
     "quota_management": "配額管理",
-    "monitoring_center": "請求監控",
+    "monitoring_center": "帳號巡檢",
     "config_management": "設定面板",
     "logs": "記錄檢視",
     "system_info": "中心資訊"

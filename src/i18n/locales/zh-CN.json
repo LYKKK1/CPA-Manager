@@ -121,7 +121,7 @@
     "auth_files": "认证文件",
     "oauth": "OAuth 登录",
     "quota_management": "配额管理",
-    "monitoring_center": "请求监控",
+    "monitoring_center": "账号巡检",
     "config_management": "配置面板",
     "logs": "日志查看",
     "system_info": "中心信息"

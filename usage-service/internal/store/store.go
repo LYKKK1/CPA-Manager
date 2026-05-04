@@ -175,6 +175,44 @@ func (s *Store) LoadSetup(ctx context.Context) (Setup, bool, error) {
 	return setup, true, nil
 }
 
+func (s *Store) SaveJSONSetting(ctx context.Context, key string, value any) error {
+	if key == "" {
+		return errors.New("setting key is required")
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(
+		ctx,
+		`insert into settings(key, value, updated_at_ms)
+		 values(?, ?, ?)
+		 on conflict(key) do update set value = excluded.value, updated_at_ms = excluded.updated_at_ms`,
+		key,
+		string(data),
+		time.Now().UnixMilli(),
+	)
+	return err
+}
+
+func (s *Store) LoadJSONSetting(ctx context.Context, key string, value any) (bool, error) {
+	if key == "" {
+		return false, errors.New("setting key is required")
+	}
+	var raw string
+	err := s.db.QueryRowContext(ctx, `select value from settings where key = ?`, key).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := json.Unmarshal([]byte(raw), value); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *Store) LoadModelPrices(ctx context.Context) (map[string]ModelPrice, error) {
 	rows, err := s.db.QueryContext(ctx, `select
 		model, prompt_per_1m, completion_per_1m, cache_per_1m, source, source_model_id, raw_json,

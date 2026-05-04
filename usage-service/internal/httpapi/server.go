@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/seakee/cpa-manager/usage-service/internal/codexinspect"
 	"github.com/seakee/cpa-manager/usage-service/internal/collector"
 	"github.com/seakee/cpa-manager/usage-service/internal/config"
 	"github.com/seakee/cpa-manager/usage-service/internal/store"
@@ -29,6 +30,7 @@ type Server struct {
 	cfg       config.Config
 	store     *store.Store
 	collector *collector.Manager
+	inspector *codexinspect.Scheduler
 	startedAt int64
 }
 
@@ -53,11 +55,18 @@ type modelPricesSyncRequest struct {
 	Models []string `json:"models"`
 }
 
-func New(cfg config.Config, store *store.Store, collector *collector.Manager) *Server {
+type codexInspectionScheduleRequest struct {
+	Enabled         bool `json:"enabled"`
+	IntervalMinutes int  `json:"intervalMinutes"`
+	AutoToggle      bool `json:"autoToggle"`
+}
+
+func New(cfg config.Config, store *store.Store, collector *collector.Manager, inspector *codexinspect.Scheduler) *Server {
 	return &Server{
 		cfg:       cfg,
 		store:     store,
 		collector: collector,
+		inspector: inspector,
 		startedAt: time.Now().UnixMilli(),
 	}
 }
@@ -81,6 +90,10 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/v0/management/model-prices") {
 		s.withCORS(s.handleModelPrices)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/v0/management/codex-inspection") {
+		s.withCORS(s.handleCodexInspection)(w, r)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/v0/management/usage") {
@@ -144,6 +157,71 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"deadLetters": deadLetters,
 		"collector":   status,
 	})
+}
+
+func (s *Server) handleCodexInspection(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeIfConfigured(w, r) {
+		return
+	}
+	path := strings.TrimRight(r.URL.Path, "/")
+	switch path {
+	case "/v0/management/codex-inspection/schedule":
+		s.handleCodexInspectionSchedule(w, r)
+	case "/v0/management/codex-inspection/run":
+		s.handleCodexInspectionRun(w, r)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) handleCodexInspectionSchedule(w http.ResponseWriter, r *http.Request) {
+	if s.inspector == nil {
+		writeError(w, http.StatusServiceUnavailable, errors.New("codex inspection scheduler is not available"))
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.inspector.Status())
+	case http.MethodPut:
+		var req codexInspectionScheduleRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if req.IntervalMinutes < 1 {
+			writeError(w, http.StatusBadRequest, errors.New("intervalMinutes must be at least 1"))
+			return
+		}
+		config, err := s.inspector.SaveSchedule(r.Context(), codexinspect.ScheduleConfig{
+			Enabled:         req.Enabled,
+			IntervalMinutes: req.IntervalMinutes,
+			AutoToggle:      req.AutoToggle,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"schedule": config, "status": s.inspector.Status()})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handleCodexInspectionRun(w http.ResponseWriter, r *http.Request) {
+	if s.inspector == nil {
+		writeError(w, http.StatusServiceUnavailable, errors.New("codex inspection scheduler is not available"))
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	result, err := s.inspector.RunNow(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {

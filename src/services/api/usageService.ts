@@ -46,6 +46,48 @@ export interface ModelPriceSyncResponse extends ModelPricesResponse {
   skipped: number;
 }
 
+export interface CodexInspectionScheduleConfig {
+  enabled: boolean;
+  intervalMinutes: number;
+  autoToggle: boolean;
+}
+
+export interface CodexInspectionServerSummary {
+  totalFiles: number;
+  probeSetCount: number;
+  sampledCount: number;
+  deleteCount: number;
+  disableCount: number;
+  enableCount: number;
+  keepCount: number;
+  autoDisabled: number;
+  autoEnabled: number;
+  autoFailed: number;
+  skippedDeletes: number;
+  messages?: string[];
+}
+
+export interface CodexInspectionServerRun {
+  summary: CodexInspectionServerSummary;
+  startedAt: number;
+  finishedAt: number;
+  error?: string;
+}
+
+export interface CodexInspectionServerStatus {
+  schedule: CodexInspectionScheduleConfig;
+  running: boolean;
+  lastRunAt?: number;
+  nextRunAt?: number;
+  lastError?: string;
+  lastRun?: CodexInspectionServerRun;
+}
+
+export interface CodexInspectionScheduleSaveResponse {
+  schedule: CodexInspectionScheduleConfig;
+  status: CodexInspectionServerStatus;
+}
+
 const USAGE_SERVICE_TIMEOUT_MS = 15 * 1000;
 export const USAGE_SERVICE_ID = 'cpa-manager';
 export const LEGACY_USAGE_SERVICE_ID = 'cpa-usage-service';
@@ -135,6 +177,36 @@ export const usageServiceApi = {
       models ? { models } : {},
       {
         timeout: 30 * 1000,
+        headers: authHeaders(managementKey),
+      }
+    );
+    return response.data;
+  },
+
+  getCodexInspectionStatus: async (
+    base: string,
+    managementKey?: string
+  ): Promise<CodexInspectionServerStatus> => {
+    const response = await axios.get<CodexInspectionServerStatus>(
+      buildUrl(base, '/v0/management/codex-inspection/schedule'),
+      {
+        timeout: USAGE_SERVICE_TIMEOUT_MS,
+        headers: authHeaders(managementKey),
+      }
+    );
+    return response.data;
+  },
+
+  saveCodexInspectionSchedule: async (
+    base: string,
+    schedule: CodexInspectionScheduleConfig,
+    managementKey?: string
+  ): Promise<CodexInspectionScheduleSaveResponse> => {
+    const response = await axios.put<CodexInspectionScheduleSaveResponse>(
+      buildUrl(base, '/v0/management/codex-inspection/schedule'),
+      schedule,
+      {
+        timeout: USAGE_SERVICE_TIMEOUT_MS,
         headers: authHeaders(managementKey),
       }
     );

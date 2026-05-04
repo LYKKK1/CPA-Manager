@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/seakee/cpa-manager/usage-service/internal/codexinspect"
 	"github.com/seakee/cpa-manager/usage-service/internal/collector"
 	"github.com/seakee/cpa-manager/usage-service/internal/config"
 	"github.com/seakee/cpa-manager/usage-service/internal/httpapi"
@@ -26,6 +27,18 @@ func main() {
 	manager := collector.NewManager(cfg, db)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	resolveRuntime := func(ctx context.Context) (codexinspect.RuntimeConfig, bool, error) {
+		if cfg.CPAUpstreamURL != "" && cfg.ManagementKey != "" {
+			return codexinspect.RuntimeConfig{BaseURL: cfg.CPAUpstreamURL, ManagementKey: cfg.ManagementKey}, true, nil
+		}
+		setup, ok, err := db.LoadSetup(ctx)
+		if err != nil || !ok {
+			return codexinspect.RuntimeConfig{}, ok, err
+		}
+		return codexinspect.RuntimeConfig{BaseURL: setup.CPAUpstreamURL, ManagementKey: setup.ManagementKey}, true, nil
+	}
+	inspector := codexinspect.NewScheduler(db, resolveRuntime)
+	inspector.Start(ctx)
 
 	if cfg.CPAUpstreamURL != "" && cfg.ManagementKey != "" {
 		manager.Start(ctx, collector.RuntimeConfig{
@@ -47,7 +60,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.New(cfg, db, manager).Handler(),
+		Handler:           httpapi.New(cfg, db, manager, inspector).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

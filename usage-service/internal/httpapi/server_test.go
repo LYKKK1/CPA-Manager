@@ -52,7 +52,7 @@ func newTestHandler(t *testing.T, upstreamURL string, saveSetup bool) http.Handl
 	}
 
 	manager := collector.NewManager(cfg, db)
-	return New(cfg, db, manager).Handler()
+	return New(cfg, db, manager, nil).Handler()
 }
 
 func TestModelListProxyPreservesAuthorization(t *testing.T) {

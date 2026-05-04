@@ -25,6 +25,7 @@ export interface CodexInspectionSettings {
   workers: number;
   deleteWorkers: number;
   timeout: number;
+  delaySeconds: number;
   retries: number;
   userAgent: string;
   usedPercentThreshold: number;
@@ -36,6 +37,7 @@ export interface CodexInspectionConfigurableSettings {
   workers: number;
   deleteWorkers: number;
   timeout: number;
+  delaySeconds: number;
   retries: number;
   userAgent: string;
   usedPercentThreshold: number;
@@ -179,6 +181,7 @@ export const DEFAULT_CODEX_INSPECTION_SETTINGS: CodexInspectionConfigurableSetti
   workers: 4,
   deleteWorkers: 4,
   timeout: 15000,
+  delaySeconds: 0,
   retries: 0,
   userAgent: 'codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal',
   usedPercentThreshold: 100,
@@ -302,6 +305,10 @@ const normalizeConfigurableSettings = (
       clampPositiveInteger(normalizeNumberValue(merged.workers) ?? undefined, DEFAULT_CODEX_INSPECTION_SETTINGS.workers)
     ),
     timeout: clampPositiveInteger(normalizeNumberValue(merged.timeout) ?? undefined, DEFAULT_CODEX_INSPECTION_SETTINGS.timeout),
+    delaySeconds: Math.max(
+      0,
+      normalizeNumberValue(merged.delaySeconds) ?? DEFAULT_CODEX_INSPECTION_SETTINGS.delaySeconds
+    ),
     retries:
       retriesValue === null ? DEFAULT_CODEX_INSPECTION_SETTINGS.retries : Math.max(0, Math.floor(retriesValue)),
     userAgent: readString(merged.userAgent) || DEFAULT_CODEX_INSPECTION_SETTINGS.userAgent,
@@ -836,6 +843,7 @@ export const resolveCodexInspectionSettings = (
     workers: configurable.workers,
     deleteWorkers: configurable.deleteWorkers,
     timeout: configurable.timeout,
+    delaySeconds: configurable.delaySeconds,
     retries: configurable.retries,
     userAgent: configurable.userAgent,
     usedPercentThreshold: configurable.usedPercentThreshold,
@@ -864,6 +872,8 @@ export const createCodexInspectionSession = ({
   let inFlight = 0;
   let finalResult: CodexInspectionRunResult | null = null;
   let deferred: CodexInspectionSessionPromiseState | null = null;
+  let nextLaunchAt = 0;
+  let launchTimer: ReturnType<typeof window.setTimeout> | null = null;
   const resultMap = new Map<string, CodexInspectionResultItem>();
 
   const emitProgress = () => {
@@ -927,9 +937,21 @@ export const createCodexInspectionSession = ({
     }
 
     while (status === 'running' && inFlight < resolvedSettings.workers && cursor < sampledAccounts.length) {
+      const now = Date.now();
+      if (nextLaunchAt > now) {
+        if (!launchTimer) {
+          launchTimer = window.setTimeout(() => {
+            launchTimer = null;
+            pump();
+          }, nextLaunchAt - now);
+        }
+        break;
+      }
+
       const account = sampledAccounts[cursor];
       cursor += 1;
       inFlight += 1;
+      nextLaunchAt = Date.now() + resolvedSettings.delaySeconds * 1000;
       emitProgress();
 
       void inspectSingleAccount(account, resolvedSettings, onLog)

@@ -33,3 +33,6 @@ settings.local.json
 *.njsproj
 *.sln
 *.sw?
+
+__pycache__/
+*.pyc

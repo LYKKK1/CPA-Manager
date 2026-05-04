@@ -5,7 +5,6 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
-import { usageServiceApi, type CodexInspectionServerStatus } from '@/services/api/usageService';
 import {
   IconChevronDown,
   IconChevronUp,
@@ -32,7 +31,6 @@ import {
   type CodexInspectionSession,
 } from '@/features/monitoring/codexInspection';
 import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
-import { useUsageServiceStore } from '@/stores/useUsageServiceStore';
 import styles from './CodexInspectionPage.module.scss';
 
 type RunStatus = 'idle' | 'running' | 'paused' | 'success' | 'error';
@@ -64,15 +62,9 @@ type InspectionSettingsDraft = {
   usedPercentThreshold: string;
   sampleSize: string;
   autoExecuteActions: boolean;
-  scheduledInspectionEnabled: boolean;
-  scheduledInspectionIntervalMinutes: string;
-  scheduledInspectionAutoToggle: boolean;
 };
 
-type InspectionSettingsDraftField = Exclude<
-  keyof InspectionSettingsDraft,
-  'autoExecuteActions' | 'scheduledInspectionEnabled' | 'scheduledInspectionAutoToggle'
->;
+type InspectionSettingsDraftField = Exclude<keyof InspectionSettingsDraft, 'autoExecuteActions'>;
 
 const actionToneClass: Record<CodexInspectionAction, string> = {
   keep: styles.actionKeep,
@@ -103,23 +95,7 @@ const toSettingsDraft = (settings: CodexInspectionConfigurableSettings): Inspect
   usedPercentThreshold: String(settings.usedPercentThreshold),
   sampleSize: String(settings.sampleSize),
   autoExecuteActions: settings.autoExecuteActions,
-  scheduledInspectionEnabled: false,
-  scheduledInspectionIntervalMinutes: '60',
-  scheduledInspectionAutoToggle: true,
 });
-
-const mergeServerInspectionDraft = (
-  draft: InspectionSettingsDraft,
-  status: CodexInspectionServerStatus | null
-): InspectionSettingsDraft => {
-  if (!status) return draft;
-  return {
-    ...draft,
-    scheduledInspectionEnabled: status.schedule.enabled,
-    scheduledInspectionIntervalMinutes: String(status.schedule.intervalMinutes || 60),
-    scheduledInspectionAutoToggle: status.schedule.autoToggle,
-  };
-};
 
 const formatActionLabel = (action: CodexInspectionAction, t: ReturnType<typeof useTranslation>['t']) => {
   switch (action) {
@@ -182,8 +158,6 @@ export function CodexInspectionPage() {
   const apiBase = useAuthStore((state) => state.apiBase);
   const managementKey = useAuthStore((state) => state.managementKey);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
-  const usageServiceEnabled = useUsageServiceStore((state) => state.enabled);
-  const usageServiceBase = useUsageServiceStore((state) => state.serviceBase);
   const showNotification = useNotificationStore((state) => state.showNotification);
   const showConfirmation = useNotificationStore((state) => state.showConfirmation);
 
@@ -200,8 +174,6 @@ export function CodexInspectionPage() {
   const [progress, setProgress] = useState<CodexInspectionProgressSnapshot>(createIdleProgressSnapshot);
   const [result, setResult] = useState<CodexInspectionRunResult | null>(null);
   const [executing, setExecuting] = useState(false);
-  const [serverInspectionStatus, setServerInspectionStatus] = useState<CodexInspectionServerStatus | null>(null);
-  const [serverInspectionLoading, setServerInspectionLoading] = useState(false);
   const logCounterRef = useRef(0);
   const sessionRef = useRef<CodexInspectionSession | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
@@ -220,27 +192,6 @@ export function CodexInspectionPage() {
       setSettingsDraft(toSettingsDraft(nextSettings));
     }
   }, [config, isSettingsModalOpen]);
-
-  const loadServerInspectionStatus = useCallback(async () => {
-    if (!usageServiceEnabled || !usageServiceBase) {
-      setServerInspectionStatus(null);
-      return;
-    }
-    setServerInspectionLoading(true);
-    try {
-      const status = await usageServiceApi.getCodexInspectionStatus(usageServiceBase, managementKey);
-      setServerInspectionStatus(status);
-      setSettingsDraft((previous) => mergeServerInspectionDraft(previous, status));
-    } catch (error) {
-      setServerInspectionStatus(null);
-    } finally {
-      setServerInspectionLoading(false);
-    }
-  }, [managementKey, usageServiceBase, usageServiceEnabled]);
-
-  useEffect(() => {
-    void loadServerInspectionStatus();
-  }, [loadServerInspectionStatus]);
 
   const appendLog = useCallback((level: CodexInspectionLogLevel, message: string) => {
     logCounterRef.current += 1;
@@ -595,9 +546,9 @@ export function CodexInspectionPage() {
         })
       : t('monitoring.codex_inspection_progress_idle');
   const openSettingsModal = useCallback(() => {
-    setSettingsDraft(mergeServerInspectionDraft(toSettingsDraft(inspectionSettings), serverInspectionStatus));
+    setSettingsDraft(toSettingsDraft(inspectionSettings));
     setIsSettingsModalOpen(true);
-  }, [inspectionSettings, serverInspectionStatus]);
+  }, [inspectionSettings]);
 
   const handleSettingsDraftChange = useCallback(
     (field: InspectionSettingsDraftField, value: string) => {
@@ -616,20 +567,6 @@ export function CodexInspectionPage() {
     }));
   }, []);
 
-  const handleScheduledInspectionEnabledChange = useCallback((value: boolean) => {
-    setSettingsDraft((previous) => ({
-      ...previous,
-      scheduledInspectionEnabled: value,
-    }));
-  }, []);
-
-  const handleScheduledInspectionAutoToggleChange = useCallback((value: boolean) => {
-    setSettingsDraft((previous) => ({
-      ...previous,
-      scheduledInspectionAutoToggle: value,
-    }));
-  }, []);
-
   const parseNonNegativeInteger = useCallback(
     (value: string, label: string, min: number) => {
       const parsed = Number(value.trim());
@@ -641,7 +578,7 @@ export function CodexInspectionPage() {
     [t]
   );
 
-  const handleSaveSettings = useCallback(async () => {
+  const handleSaveSettings = useCallback(() => {
     const targetType = settingsDraft.targetType.trim().toLowerCase();
     if (!targetType) {
       showNotification(t('monitoring.codex_inspection_settings_target_type_required'), 'error');
@@ -696,36 +633,14 @@ export function CodexInspectionPage() {
         autoExecuteActions: settingsDraft.autoExecuteActions,
       });
 
-      const intervalMinutes = parseNonNegativeInteger(
-        settingsDraft.scheduledInspectionIntervalMinutes,
-        t('monitoring.codex_inspection_settings_schedule_interval_label'),
-        1
-      );
-
-      if (usageServiceEnabled && usageServiceBase) {
-        const response = await usageServiceApi.saveCodexInspectionSchedule(
-          usageServiceBase,
-          {
-            enabled: settingsDraft.scheduledInspectionEnabled,
-            intervalMinutes,
-            autoToggle: settingsDraft.scheduledInspectionAutoToggle,
-          },
-          managementKey
-        );
-        setServerInspectionStatus(response.status);
-      } else if (settingsDraft.scheduledInspectionEnabled) {
-        showNotification(t('monitoring.codex_inspection_settings_schedule_requires_service'), 'error');
-        return;
-      }
-
       setInspectionSettings(nextSettings);
-      setSettingsDraft(mergeServerInspectionDraft(toSettingsDraft(nextSettings), serverInspectionStatus));
+      setSettingsDraft(toSettingsDraft(nextSettings));
       setIsSettingsModalOpen(false);
       showNotification(t('monitoring.codex_inspection_settings_saved'), 'success');
     } catch (error) {
       showNotification(error instanceof Error ? error.message : String(error || t('common.unknown_error')), 'error');
     }
-  }, [managementKey, parseNonNegativeInteger, serverInspectionStatus, settingsDraft, showNotification, t, usageServiceBase, usageServiceEnabled]);
+  }, [parseNonNegativeInteger, settingsDraft, showNotification, t]);
 
   const handleResetSettings = useCallback(() => {
     clearCodexInspectionConfigurableSettings();
@@ -792,25 +707,6 @@ export function CodexInspectionPage() {
           <span className={styles.metaPill}>{`${t('monitoring.codex_inspection_delete_workers')}: ${inspectionSettings.deleteWorkers}`}</span>
           <span className={styles.metaPill}>{`${t('monitoring.codex_inspection_sample_size')}: ${inspectionSettings.sampleSize}`}</span>
           <span className={styles.metaPill}>{`${t('monitoring.codex_inspection_delay_seconds')}: ${inspectionSettings.delaySeconds}s`}</span>
-          <span className={styles.metaPill}>
-            {`${t('monitoring.codex_inspection_schedule_status')}: ${
-              serverInspectionStatus?.schedule.enabled ? t('common.yes') : t('common.no')
-            }`}
-          </span>
-          <span className={styles.metaPill}>
-            {`${t('monitoring.codex_inspection_schedule_interval')}: ${
-              serverInspectionStatus?.schedule.intervalMinutes ?? 60
-            } ${t('monitoring.minutes_suffix')}`}
-          </span>
-          <span className={styles.metaPill}>
-            {`${t('monitoring.codex_inspection_schedule_next_run')}: ${
-              serverInspectionLoading
-                ? t('common.loading')
-                : serverInspectionStatus?.nextRunAt
-                  ? formatTimestamp(serverInspectionStatus.nextRunAt, i18n.language)
-                  : '--'
-            }`}
-          </span>
           <span className={styles.metaPill}>
             {`${t('monitoring.codex_inspection_settings_auto_execute_actions_label')}: ${
               inspectionSettings.autoExecuteActions ? t('common.yes') : t('common.no')
@@ -1104,45 +1000,6 @@ export function CodexInspectionPage() {
             />
             <span className={styles.settingsHint}>
               {t('monitoring.codex_inspection_settings_auto_execute_actions_hint')}
-            </span>
-          </div>
-          <div className={`${styles.settingsField} ${styles.settingsFieldWide} ${styles.settingsToggleField}`}>
-            <ToggleSwitch
-              checked={settingsDraft.scheduledInspectionEnabled}
-              onChange={handleScheduledInspectionEnabledChange}
-              label={t('monitoring.codex_inspection_settings_schedule_enabled_label')}
-              ariaLabel={t('monitoring.codex_inspection_settings_schedule_enabled_label')}
-              labelPosition="left"
-            />
-            <span className={styles.settingsHint}>
-              {usageServiceEnabled
-                ? t('monitoring.codex_inspection_settings_schedule_enabled_hint')
-                : t('monitoring.codex_inspection_settings_schedule_requires_service')}
-            </span>
-          </div>
-          <div className={styles.settingsField}>
-            <Input
-              label={t('monitoring.codex_inspection_settings_schedule_interval_label')}
-              hint={t('monitoring.codex_inspection_settings_schedule_interval_hint')}
-              type="number"
-              value={settingsDraft.scheduledInspectionIntervalMinutes}
-              onChange={(event) => handleSettingsDraftChange('scheduledInspectionIntervalMinutes', event.target.value)}
-              min={1}
-              step={1}
-              disabled={!usageServiceEnabled}
-            />
-          </div>
-          <div className={`${styles.settingsField} ${styles.settingsToggleField}`}>
-            <ToggleSwitch
-              checked={settingsDraft.scheduledInspectionAutoToggle}
-              onChange={handleScheduledInspectionAutoToggleChange}
-              label={t('monitoring.codex_inspection_settings_schedule_auto_toggle_label')}
-              ariaLabel={t('monitoring.codex_inspection_settings_schedule_auto_toggle_label')}
-              labelPosition="left"
-              disabled={!usageServiceEnabled}
-            />
-            <span className={styles.settingsHint}>
-              {t('monitoring.codex_inspection_settings_schedule_auto_toggle_hint')}
             </span>
           </div>
           <div className={`${styles.settingsField} ${styles.settingsFieldWide}`}>

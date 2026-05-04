@@ -132,6 +132,9 @@ const countActions = (items: CodexInspectionResultItem[]) => {
   return summary;
 };
 
+const isAutoExecutableAction = (item: CodexInspectionResultItem) =>
+  item.action === 'disable' || item.action === 'enable';
+
 const createIdleProgressSnapshot = (): CodexInspectionProgressSnapshot => ({
   total: 0,
   completed: 0,
@@ -229,18 +232,19 @@ export function CodexInspectionPage() {
         .then((nextResult) => {
           if (activeSessionIdRef.current !== sessionId) return;
           const nextActionableResults = nextResult.results.filter(isSuggestedAction);
+          const nextAutoExecutableResults = nextResult.results.filter(isAutoExecutableAction);
           setResult(nextResult);
           setProgress(session.getProgress());
           setRunStatus('success');
           setLogsCollapsed(true);
           if (autoExecuteOnComplete) {
-            if (nextActionableResults.length > 0 && executeItemsRef.current) {
+            if (nextAutoExecutableResults.length > 0 && executeItemsRef.current) {
               const startedMessage = t('monitoring.codex_inspection_auto_execute_started', {
-                count: nextActionableResults.length,
+                count: nextAutoExecutableResults.length,
               });
               appendLog('info', startedMessage);
               showNotification(startedMessage, 'info');
-              void executeItemsRef.current(nextActionableResults, {
+              void executeItemsRef.current(nextAutoExecutableResults, {
                 resultOverride: nextResult,
                 source: 'auto',
               });

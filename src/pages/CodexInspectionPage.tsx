@@ -54,6 +54,7 @@ type SummaryCard = {
 type InspectionHistoryEntry = {
   id: string;
   timestamp: number;
+  fileName: string;
   account: string;
   action: CodexInspectionAction;
   reason: string;
@@ -159,7 +160,12 @@ const loadInspectionHistoryEntries = (): InspectionHistoryEntry[] => {
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((entry): entry is InspectionHistoryEntry => {
       if (!entry || typeof entry !== 'object') return false;
-      return typeof entry.id === 'string' && typeof entry.account === 'string' && typeof entry.reason === 'string';
+      return (
+        typeof entry.id === 'string' &&
+        typeof entry.fileName === 'string' &&
+        typeof entry.account === 'string' &&
+        typeof entry.reason === 'string'
+      );
     });
   } catch {
     return [];
@@ -177,12 +183,44 @@ const createIssueHistoryEntries = (items: CodexInspectionResultItem[]): Inspecti
   items.map((item) => ({
     id: `issue-${item.fileName}-${item.action}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     timestamp: Date.now(),
+    fileName: item.fileName,
     account: item.displayAccount,
     action: item.action,
     reason: item.actionReason,
     kind: 'issue',
     source: 'inspection',
   }));
+
+const mergeExecutionHistoryEntries = (
+  previous: InspectionHistoryEntry[],
+  executions: InspectionHistoryEntry[]
+): InspectionHistoryEntry[] => {
+  const next = [...previous];
+
+  executions.forEach((executionEntry) => {
+    const matchIndex = next.findIndex(
+      (entry) =>
+        entry.kind === 'issue' &&
+        entry.fileName === executionEntry.fileName &&
+        entry.action === executionEntry.action &&
+        entry.reason === executionEntry.reason
+    );
+
+    if (matchIndex >= 0) {
+      next[matchIndex] = {
+        ...next[matchIndex],
+        ...executionEntry,
+        id: next[matchIndex].id,
+      };
+      return;
+    }
+
+    next.unshift(executionEntry);
+  });
+
+  next.sort((left, right) => right.timestamp - left.timestamp);
+  return trimInspectionHistoryEntries(next);
+};
 
 const createIdleProgressSnapshot = (): CodexInspectionProgressSnapshot => ({
   total: 0,
@@ -464,19 +502,25 @@ export function CodexInspectionPage() {
           onLog: appendLog,
         });
         const targetReasonMap = new Map(targets.map((item) => [item.fileName, item.actionReason] as const));
-        prependHistoryEntries(
-          execution.outcomes.map((outcome) => ({
-            id: `execution-${outcome.fileName}-${outcome.action}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            timestamp: Date.now(),
-            account: outcome.displayAccount,
-            action: outcome.action,
-            reason: targetReasonMap.get(outcome.fileName) || '',
-            kind: 'execution',
-            source,
-            success: outcome.success,
-            error: outcome.error,
-          }))
-        );
+        setHistoryEntries((previous) => {
+          const next = mergeExecutionHistoryEntries(
+            previous,
+            execution.outcomes.map((outcome) => ({
+              id: `execution-${outcome.fileName}-${outcome.action}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              timestamp: Date.now(),
+              fileName: outcome.fileName,
+              account: outcome.displayAccount,
+              action: outcome.action,
+              reason: targetReasonMap.get(outcome.fileName) || '',
+              kind: 'execution',
+              source,
+              success: outcome.success,
+              error: outcome.error,
+            }))
+          );
+          persistInspectionHistoryEntries(next);
+          return next;
+        });
 
         const failed = execution.outcomes.filter((item) => !item.success);
         if (failed.length > 0) {
@@ -516,7 +560,7 @@ export function CodexInspectionPage() {
         setExecuting(false);
       }
     },
-    [appendLog, prependHistoryEntries, result, showNotification, t]
+    [appendLog, result, showNotification, t]
   );
 
   useEffect(() => {

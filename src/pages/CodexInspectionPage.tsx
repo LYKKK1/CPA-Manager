@@ -51,6 +51,18 @@ type SummaryCard = {
   tone?: 'neutral' | 'good' | 'warn' | 'bad';
 };
 
+type InspectionHistoryEntry = {
+  id: string;
+  timestamp: number;
+  account: string;
+  action: CodexInspectionAction;
+  reason: string;
+  kind: 'issue' | 'execution';
+  source: ExecutionTriggerSource | 'inspection';
+  success?: boolean;
+  error?: string;
+};
+
 type InspectionSettingsDraft = {
   targetType: string;
   workers: string;
@@ -79,6 +91,9 @@ const levelClassMap: Record<CodexInspectionLogLevel, string> = {
   warning: styles.logWarning,
   error: styles.logError,
 };
+
+const CODEX_INSPECTION_HISTORY_STORAGE_KEY = 'cli-proxy-codex-inspection-history-v1';
+const CODEX_INSPECTION_HISTORY_LIMIT = 10;
 
 const formatTimestamp = (value: number, locale: string) => new Date(value).toLocaleString(locale);
 
@@ -135,6 +150,40 @@ const countActions = (items: CodexInspectionResultItem[]) => {
 const isAutoExecutableAction = (item: CodexInspectionResultItem) =>
   item.action === 'disable' || item.action === 'enable';
 
+const loadInspectionHistoryEntries = (): InspectionHistoryEntry[] => {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(CODEX_INSPECTION_HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is InspectionHistoryEntry => {
+      if (!entry || typeof entry !== 'object') return false;
+      return typeof entry.id === 'string' && typeof entry.account === 'string' && typeof entry.reason === 'string';
+    });
+  } catch {
+    return [];
+  }
+};
+
+const persistInspectionHistoryEntries = (entries: InspectionHistoryEntry[]) => {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(CODEX_INSPECTION_HISTORY_STORAGE_KEY, JSON.stringify(entries));
+};
+
+const trimInspectionHistoryEntries = (entries: InspectionHistoryEntry[]) => entries.slice(0, CODEX_INSPECTION_HISTORY_LIMIT);
+
+const createIssueHistoryEntries = (items: CodexInspectionResultItem[]): InspectionHistoryEntry[] =>
+  items.map((item) => ({
+    id: `issue-${item.fileName}-${item.action}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    timestamp: Date.now(),
+    account: item.displayAccount,
+    action: item.action,
+    reason: item.actionReason,
+    kind: 'issue',
+    source: 'inspection',
+  }));
+
 const createIdleProgressSnapshot = (): CodexInspectionProgressSnapshot => ({
   total: 0,
   completed: 0,
@@ -177,6 +226,7 @@ export function CodexInspectionPage() {
   const [progress, setProgress] = useState<CodexInspectionProgressSnapshot>(createIdleProgressSnapshot);
   const [result, setResult] = useState<CodexInspectionRunResult | null>(null);
   const [executing, setExecuting] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<InspectionHistoryEntry[]>(loadInspectionHistoryEntries);
   const logCounterRef = useRef(0);
   const sessionRef = useRef<CodexInspectionSession | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
@@ -209,6 +259,15 @@ export function CodexInspectionPage() {
     ]);
   }, []);
 
+  const prependHistoryEntries = useCallback((entries: InspectionHistoryEntry[]) => {
+    if (entries.length === 0) return;
+    setHistoryEntries((previous) => {
+      const next = trimInspectionHistoryEntries([...entries, ...previous]);
+      persistInspectionHistoryEntries(next);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     if (logsCollapsed) return;
     const element = logListRef.current;
@@ -232,7 +291,9 @@ export function CodexInspectionPage() {
         .then((nextResult) => {
           if (activeSessionIdRef.current !== sessionId) return;
           const nextAutoExecutableResults = nextResult.results.filter(isAutoExecutableAction);
+          const nextIssueEntries = createIssueHistoryEntries(nextResult.results.filter(isSuggestedAction));
           setResult(nextResult);
+          prependHistoryEntries(nextIssueEntries);
           setProgress(session.getProgress());
           setRunStatus('success');
           setLogsCollapsed(true);
@@ -402,6 +463,20 @@ export function CodexInspectionPage() {
           previousFiles: currentResult.files,
           onLog: appendLog,
         });
+        const targetReasonMap = new Map(targets.map((item) => [item.fileName, item.actionReason] as const));
+        prependHistoryEntries(
+          execution.outcomes.map((outcome) => ({
+            id: `execution-${outcome.fileName}-${outcome.action}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            timestamp: Date.now(),
+            account: outcome.displayAccount,
+            action: outcome.action,
+            reason: targetReasonMap.get(outcome.fileName) || '',
+            kind: 'execution',
+            source,
+            success: outcome.success,
+            error: outcome.error,
+          }))
+        );
 
         const failed = execution.outcomes.filter((item) => !item.success);
         if (failed.length > 0) {
@@ -441,7 +516,7 @@ export function CodexInspectionPage() {
         setExecuting(false);
       }
     },
-    [appendLog, result, showNotification, t]
+    [appendLog, prependHistoryEntries, result, showNotification, t]
   );
 
   useEffect(() => {
@@ -538,6 +613,7 @@ export function CodexInspectionPage() {
   }, [progress.summary, result, runStatus, t]);
 
   const pendingActionCount = actionableResults.length;
+  const historyCount = historyEntries.length;
   const progressLabel =
     progress.total > 0
       ? t('monitoring.codex_inspection_progress_status', {
@@ -548,6 +624,39 @@ export function CodexInspectionPage() {
           percent: progress.percent,
         })
       : t('monitoring.codex_inspection_progress_idle');
+
+  const formatHistoryTitle = useCallback(
+    (entry: InspectionHistoryEntry) => {
+      if (entry.kind === 'issue') {
+        return t('monitoring.codex_inspection_history_issue_title', {
+          action: formatActionLabel(entry.action, t),
+        });
+      }
+      return t('monitoring.codex_inspection_history_execution_title', {
+        action: formatActionLabel(entry.action, t),
+      });
+    },
+    [t]
+  );
+
+  const formatHistoryResult = useCallback(
+    (entry: InspectionHistoryEntry) => {
+      if (entry.kind === 'issue') {
+        return entry.action === 'delete'
+          ? t('monitoring.codex_inspection_history_issue_delete_pending')
+          : t('monitoring.codex_inspection_history_issue_pending');
+      }
+      if (entry.success) {
+        return entry.source === 'auto'
+          ? t('monitoring.codex_inspection_history_execution_auto_success')
+          : t('monitoring.codex_inspection_history_execution_manual_success');
+      }
+      return entry.error
+        ? t('monitoring.codex_inspection_history_execution_failed', { error: entry.error })
+        : t('monitoring.codex_inspection_history_execution_failed', { error: t('common.unknown_error') });
+    },
+    [t]
+  );
   const openSettingsModal = useCallback(() => {
     setSettingsDraft(toSettingsDraft(inspectionSettings));
     setIsSettingsModalOpen(true);
@@ -795,6 +904,56 @@ export function CodexInspectionPage() {
           <div className={styles.logCollapsedBar}>
             <span>{t('monitoring.codex_inspection_logs_collapsed', { count: logs.length })}</span>
           </div>
+        )}
+      </Card>
+
+      <Card className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <div>
+            <h2 className={styles.panelTitle}>{t('monitoring.codex_inspection_history_title')}</h2>
+            <p className={styles.panelSubtitle}>{t('monitoring.codex_inspection_history_desc')}</p>
+          </div>
+          <div className={styles.panelMeta}>
+            <span>{`${t('monitoring.codex_inspection_history_count')}: ${historyCount}`}</span>
+          </div>
+        </div>
+
+        {historyCount > 0 ? (
+          <div className={styles.tableWrap}>
+            <table className={`${styles.table} ${styles.historyTable}`}>
+              <thead>
+                <tr>
+                  <th>{t('monitoring.codex_inspection_history_time')}</th>
+                  <th>{t('monitoring.account_label')}</th>
+                  <th>{t('monitoring.codex_inspection_history_event')}</th>
+                  <th>{t('monitoring.codex_inspection_reason')}</th>
+                  <th>{t('monitoring.codex_inspection_history_result')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historyEntries.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{formatTimestamp(entry.timestamp, i18n.language)}</td>
+                    <td>
+                      <div className={styles.primaryCell}>
+                        <span>{entry.account}</span>
+                        <small>{entry.source === 'inspection' ? t('monitoring.codex_inspection_history_source_inspection') : entry.source === 'auto' ? t('monitoring.codex_inspection_history_source_auto') : t('monitoring.codex_inspection_history_source_manual')}</small>
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`${styles.actionBadge} ${actionToneClass[entry.action]}`}>
+                        {formatHistoryTitle(entry)}
+                      </span>
+                    </td>
+                    <td className={entry.reason ? '' : styles.mutedText}>{entry.reason || '--'}</td>
+                    <td className={entry.success === false ? styles.errorText : styles.mutedText}>{formatHistoryResult(entry)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className={styles.emptyBlock}>{t('monitoring.codex_inspection_history_empty')}</div>
         )}
       </Card>
 

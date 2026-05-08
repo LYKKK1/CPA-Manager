@@ -23,6 +23,8 @@ CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 FIVE_HOUR_WINDOW_SECONDS = 18_000
 WEEK_WINDOW_SECONDS = 604_800
 DEFAULT_USER_AGENT = "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
+DEFAULT_HISTORY_PATH = "/root/cliproxyapi/static/codex-inspection-history.json"
+HISTORY_LIMIT = 10
 
 
 @dataclass
@@ -35,6 +37,7 @@ class Settings:
     timeout_seconds: float
     user_agent: str
     dry_run: bool
+    history_path: str
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -69,7 +72,104 @@ def read_settings() -> Settings:
         timeout_seconds=max(1.0, env_float("CODEX_INSPECTION_TIMEOUT_SECONDS", 15.0)),
         user_agent=os.getenv("CODEX_INSPECTION_USER_AGENT", DEFAULT_USER_AGENT).strip() or DEFAULT_USER_AGENT,
         dry_run=env_bool("CODEX_INSPECTION_DRY_RUN", False),
+        history_path=os.getenv("CODEX_INSPECTION_HISTORY_PATH", DEFAULT_HISTORY_PATH).strip(),
     )
+
+
+def current_millis() -> int:
+    return int(time.time() * 1000)
+
+
+def load_history(path: str) -> list[dict[str, Any]]:
+    if not path:
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except FileNotFoundError:
+        return []
+    except Exception as exc:
+        print(f"WARN failed to read history {path}: {exc}", file=sys.stderr)
+        return []
+    entries = data.get("entries") if isinstance(data, dict) else data
+    return entries if isinstance(entries, list) else []
+
+
+def history_key(entry: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        normalize_string(entry.get("fileName")),
+        normalize_string(entry.get("action")),
+        normalize_string(entry.get("reason")),
+        normalize_string(entry.get("source")),
+    )
+
+
+def save_history(path: str, entries: list[dict[str, Any]]) -> None:
+    if not path:
+        return
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    tmp_path = f"{path}.tmp"
+    payload = {
+        "updatedAt": current_millis(),
+        "entries": entries[:HISTORY_LIMIT],
+    }
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+    os.replace(tmp_path, path)
+
+
+def append_history(settings: Settings, entry: dict[str, Any]) -> None:
+    if not settings.history_path:
+        return
+    entries = load_history(settings.history_path)
+    key = history_key(entry)
+    next_entries = []
+    replaced = False
+    for existing in entries:
+        if isinstance(existing, dict) and history_key(existing) == key:
+            next_entries.append({**existing, **entry, "id": normalize_string(existing.get("id")) or entry["id"]})
+            replaced = True
+        else:
+            next_entries.append(existing)
+    if not replaced:
+        next_entries.insert(0, entry)
+    next_entries = [item for item in next_entries if isinstance(item, dict)]
+    next_entries.sort(key=lambda item: int(item.get("timestamp") or 0), reverse=True)
+    try:
+        save_history(settings.history_path, next_entries)
+    except Exception as exc:
+        print(f"WARN failed to write history {settings.history_path}: {exc}", file=sys.stderr)
+
+
+def record_history(
+    settings: Settings,
+    result: dict[str, Any],
+    kind: str,
+    success: bool | None = None,
+    error: str = "",
+) -> None:
+    action = normalize_string(result.get("action"))
+    file_name = normalize_string(result.get("file"))
+    if action == "keep" or not file_name:
+        return
+    timestamp = current_millis()
+    entry: dict[str, Any] = {
+        "id": f"timer-{kind}-{file_name}-{action}-{timestamp}",
+        "timestamp": timestamp,
+        "fileName": file_name,
+        "account": normalize_string(result.get("label")) or "unknown",
+        "action": action,
+        "reason": normalize_string(result.get("reason")),
+        "kind": kind,
+        "source": "timer",
+    }
+    if success is not None:
+        entry["success"] = success
+    if error:
+        entry["error"] = error
+    append_history(settings, entry)
 
 
 def request_json(settings: Settings, method: str, path: str, payload: Any | None = None) -> Any:
@@ -288,10 +388,21 @@ def main() -> int:
             summary[action] = summary.get(action, 0) + 1
             print(f"{result['label']} -> {action}: {result['reason']}")
             file_name = normalize_string(result.get("file"))
+            record_history(settings, result, "issue")
             if action == "disable" and file_name:
-                set_disabled(settings, file_name, True)
+                try:
+                    set_disabled(settings, file_name, True)
+                    record_history(settings, result, "execution", True)
+                except Exception as exc:
+                    record_history(settings, result, "execution", False, str(exc))
+                    raise
             elif action == "enable" and file_name:
-                set_disabled(settings, file_name, False)
+                try:
+                    set_disabled(settings, file_name, False)
+                    record_history(settings, result, "execution", True)
+                except Exception as exc:
+                    record_history(settings, result, "execution", False, str(exc))
+                    raise
             elif action == "delete":
                 print(f"skip delete {file_name}: automatic deletion is disabled")
         except Exception as exc:
@@ -306,4 +417,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

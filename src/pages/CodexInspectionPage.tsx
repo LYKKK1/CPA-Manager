@@ -59,7 +59,7 @@ type InspectionHistoryEntry = {
   action: CodexInspectionAction;
   reason: string;
   kind: 'issue' | 'execution';
-  source: ExecutionTriggerSource | 'inspection';
+  source: ExecutionTriggerSource | 'inspection' | 'timer';
   success?: boolean;
   error?: string;
 };
@@ -94,6 +94,7 @@ const levelClassMap: Record<CodexInspectionLogLevel, string> = {
 };
 
 const CODEX_INSPECTION_HISTORY_STORAGE_KEY = 'cli-proxy-codex-inspection-history-v1';
+const CODEX_INSPECTION_SERVER_HISTORY_PATH = '/codex-inspection-history.json';
 const CODEX_INSPECTION_HISTORY_LIMIT = 10;
 
 const formatTimestamp = (value: number, locale: string) => new Date(value).toLocaleString(locale);
@@ -158,15 +159,7 @@ const loadInspectionHistoryEntries = (): InspectionHistoryEntry[] => {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((entry): entry is InspectionHistoryEntry => {
-      if (!entry || typeof entry !== 'object') return false;
-      return (
-        typeof entry.id === 'string' &&
-        typeof entry.fileName === 'string' &&
-        typeof entry.account === 'string' &&
-        typeof entry.reason === 'string'
-      );
-    });
+    return trimInspectionHistoryEntries(parsed.map(normalizeInspectionHistoryEntry).filter(isInspectionHistoryEntry));
   } catch {
     return [];
   }
@@ -178,6 +171,60 @@ const persistInspectionHistoryEntries = (entries: InspectionHistoryEntry[]) => {
 };
 
 const trimInspectionHistoryEntries = (entries: InspectionHistoryEntry[]) => entries.slice(0, CODEX_INSPECTION_HISTORY_LIMIT);
+
+const normalizeInspectionHistoryEntry = (entry: unknown): InspectionHistoryEntry | null => {
+  if (!entry || typeof entry !== 'object') return null;
+  const item = entry as Partial<InspectionHistoryEntry>;
+  if (
+    typeof item.fileName !== 'string' ||
+    typeof item.account !== 'string' ||
+    typeof item.reason !== 'string' ||
+    typeof item.action !== 'string' ||
+    typeof item.kind !== 'string' ||
+    typeof item.source !== 'string'
+  ) {
+    return null;
+  }
+  if (!['keep', 'delete', 'disable', 'enable'].includes(item.action)) return null;
+  if (!['issue', 'execution'].includes(item.kind)) return null;
+  if (!['inspection', 'manual', 'auto', 'timer'].includes(item.source)) return null;
+  const timestamp = typeof item.timestamp === 'number' && Number.isFinite(item.timestamp) ? item.timestamp : Date.now();
+  return {
+    id: typeof item.id === 'string' && item.id ? item.id : `${item.source}-${item.kind}-${item.fileName}-${item.action}-${timestamp}`,
+    timestamp,
+    fileName: item.fileName,
+    account: item.account,
+    action: item.action as CodexInspectionAction,
+    reason: item.reason,
+    kind: item.kind as InspectionHistoryEntry['kind'],
+    source: item.source as InspectionHistoryEntry['source'],
+    success: typeof item.success === 'boolean' ? item.success : undefined,
+    error: typeof item.error === 'string' ? item.error : undefined,
+  };
+};
+
+const isInspectionHistoryEntry = (entry: InspectionHistoryEntry | null): entry is InspectionHistoryEntry =>
+  entry !== null;
+
+const historyEntryKey = (entry: InspectionHistoryEntry) =>
+  `${entry.fileName}\n${entry.action}\n${entry.reason}\n${entry.source}`;
+
+const mergeHistoryEntries = (
+  previous: InspectionHistoryEntry[],
+  incoming: InspectionHistoryEntry[]
+): InspectionHistoryEntry[] => {
+  const map = new Map<string, InspectionHistoryEntry>();
+  [...previous, ...incoming].forEach((entry) => {
+    const key = historyEntryKey(entry);
+    const existing = map.get(key);
+    if (!existing || entry.timestamp >= existing.timestamp) {
+      map.set(key, { ...existing, ...entry, id: existing?.id || entry.id });
+    }
+  });
+  return trimInspectionHistoryEntries(
+    Array.from(map.values()).sort((left, right) => right.timestamp - left.timestamp)
+  );
+};
 
 const createIssueHistoryEntries = (items: CodexInspectionResultItem[]): InspectionHistoryEntry[] =>
   items.map((item) => ({
@@ -219,7 +266,7 @@ const mergeExecutionHistoryEntries = (
   });
 
   next.sort((left, right) => right.timestamp - left.timestamp);
-  return trimInspectionHistoryEntries(next);
+  return mergeHistoryEntries([], next);
 };
 
 const createIdleProgressSnapshot = (): CodexInspectionProgressSnapshot => ({
@@ -300,10 +347,43 @@ export function CodexInspectionPage() {
   const prependHistoryEntries = useCallback((entries: InspectionHistoryEntry[]) => {
     if (entries.length === 0) return;
     setHistoryEntries((previous) => {
-      const next = trimInspectionHistoryEntries([...entries, ...previous]);
+      const next = mergeHistoryEntries(previous, entries);
       persistInspectionHistoryEntries(next);
       return next;
     });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadServerHistory = async () => {
+      try {
+        const response = await fetch(`${CODEX_INSPECTION_SERVER_HISTORY_PATH}?t=${Date.now()}`, {
+          cache: 'no-store',
+        });
+        if (!response.ok) return;
+        const payload: unknown = await response.json();
+        const rawEntries = Array.isArray(payload)
+          ? payload
+          : payload && typeof payload === 'object' && Array.isArray((payload as { entries?: unknown }).entries)
+            ? (payload as { entries: unknown[] }).entries
+            : [];
+        const serverEntries = rawEntries.map(normalizeInspectionHistoryEntry).filter(isInspectionHistoryEntry);
+        if (cancelled || serverEntries.length === 0) return;
+        setHistoryEntries((previous) => {
+          const next = mergeHistoryEntries(previous, serverEntries);
+          persistInspectionHistoryEntries(next);
+          return next;
+        });
+      } catch {
+        // Static history is optional. Ignore 404/network errors when timer is not installed.
+      }
+    };
+    void loadServerHistory();
+    const timer = window.setInterval(() => void loadServerHistory(), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -981,7 +1061,15 @@ export function CodexInspectionPage() {
                     <td>
                       <div className={styles.primaryCell}>
                         <span>{entry.account}</span>
-                        <small>{entry.source === 'inspection' ? t('monitoring.codex_inspection_history_source_inspection') : entry.source === 'auto' ? t('monitoring.codex_inspection_history_source_auto') : t('monitoring.codex_inspection_history_source_manual')}</small>
+                        <small>
+                          {entry.source === 'inspection'
+                            ? t('monitoring.codex_inspection_history_source_inspection')
+                            : entry.source === 'auto'
+                              ? t('monitoring.codex_inspection_history_source_auto')
+                              : entry.source === 'timer'
+                                ? t('monitoring.codex_inspection_history_source_timer')
+                                : t('monitoring.codex_inspection_history_source_manual')}
+                        </small>
                       </div>
                     </td>
                     <td>

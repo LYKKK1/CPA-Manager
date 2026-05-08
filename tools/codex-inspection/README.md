@@ -4,6 +4,8 @@ Standalone server-side Codex account inspection for CLIProxyAPI. It does not use
 
 Safety rule: the script never deletes accounts. It only auto-disables quota-exhausted accounts and auto-enables disabled accounts whose weekly quota is available again. Invalid accounts are logged as delete suggestions.
 
+The script writes the latest 10 issue/action history records to `/root/cliproxyapi/static/codex-inspection-history.json` by default. When CPA serves `management.html`, the frontend can read this static JSON file and show timer inspection history without Usage Service.
+
 ## Install
 
 Copy files to the server:
@@ -54,4 +56,3 @@ Set this in `/etc/cliproxyapi/codex-inspection.env`:
 ```bash
 CODEX_INSPECTION_DRY_RUN=true
 ```
-

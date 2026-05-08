@@ -526,6 +526,7 @@
     "problem_filter_label": "问题筛选",
     "problem_filter_only": "仅显示有问题凭证",
     "disabled_filter_only": "仅显示已停用凭证",
+    "normal_filter_only": "仅显示正常凭证",
     "display_options_label": "显示选项",
     "compact_mode_label": "简略模式",
     "sort_label": "排序",
@@ -1794,3 +1795,4 @@
     "author": "作者"
   }
 }
+

@@ -520,6 +520,7 @@
     "problem_filter_label": "問題篩選",
     "problem_filter_only": "僅顯示有問題憑證",
     "disabled_filter_only": "僅顯示已停用憑證",
+    "normal_filter_only": "僅顯示正常憑證",
     "display_options_label": "顯示選項",
     "compact_mode_label": "簡略模式",
     "sort_label": "排序",
@@ -1796,3 +1797,4 @@
     "author": "作者"
   }
 }
+

@@ -623,7 +623,9 @@
     "prefix_proxy_invalid_json": "该认证文件不是 JSON 对象，无法编辑字段。",
     "prefix_proxy_saved_success": "已更新认证文件 \"{{name}}\"",
     "quota_refresh_success": "已刷新 \"{{name}}\" 的额度",
-    "quota_refresh_failed": "刷新 \"{{name}}\" 的额度失败：{{message}}"
+    "quota_refresh_failed": "刷新 \"{{name}}\" 的额度失败：{{message}}",
+    "usage_limit_auto_disabled": "检测到 {{count}} 个凭证达到用量上限，已自动停用",
+    "usage_limit_auto_disable_failed": "检测到 {{count}} 个用量上限凭证，但自动停用失败"
   },
   "antigravity_quota": {
     "title": "Antigravity 额度",
@@ -1795,4 +1797,3 @@
     "author": "作者"
   }
 }
-

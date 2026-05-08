@@ -140,6 +140,22 @@ export const getAuthFileStatusMessage = (file: AuthFileItem): string => {
 export const hasAuthFileStatusMessage = (file: AuthFileItem): boolean =>
   getAuthFileStatusMessage(file).length > 0;
 
+export const isUsageLimitReachedAuthFile = (file: AuthFileItem): boolean => {
+  const rawMessage = getAuthFileStatusMessage(file);
+  if (!rawMessage) return false;
+  if (rawMessage.includes('usage_limit_reached')) return true;
+
+  try {
+    const parsed = JSON.parse(rawMessage) as unknown;
+    if (!parsed || typeof parsed !== 'object') return false;
+    const error = (parsed as { error?: unknown }).error;
+    if (!error || typeof error !== 'object') return false;
+    return (error as { type?: unknown }).type === 'usage_limit_reached';
+  } catch {
+    return false;
+  }
+};
+
 export const getTypeLabel = (t: TFunction, type: string): string => {
   const key = `auth_files.filter_${type}`;
   const translated = t(key);

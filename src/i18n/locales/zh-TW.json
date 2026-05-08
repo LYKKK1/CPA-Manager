@@ -617,7 +617,9 @@
     "prefix_proxy_invalid_json": "該驗證檔案不是 JSON 物件，無法編輯欄位。",
     "prefix_proxy_saved_success": "已更新驗證檔案「{{name}}」",
     "quota_refresh_success": "已重新整理「{{name}}」的配額",
-    "quota_refresh_failed": "重新整理「{{name}}」的配額失敗：{{message}}"
+    "quota_refresh_failed": "重新整理「{{name}}」的配額失敗：{{message}}",
+    "usage_limit_auto_disabled": "偵測到 {{count}} 個憑證達到用量上限，已自動停用",
+    "usage_limit_auto_disable_failed": "偵測到 {{count}} 個用量上限憑證，但自動停用失敗"
   },
   "antigravity_quota": {
     "title": "Antigravity 配額",
@@ -1797,4 +1799,3 @@
     "author": "作者"
   }
 }
-

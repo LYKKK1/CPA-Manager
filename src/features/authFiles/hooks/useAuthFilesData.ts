@@ -10,6 +10,7 @@ import { downloadBlob } from '@/utils/download';
 import {
   getTypeLabel,
   hasAuthFileStatusMessage,
+  isUsageLimitReachedAuthFile,
   isRuntimeOnlyAuthFile,
 } from '@/features/authFiles/constants';
 
@@ -66,6 +67,7 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const batchStatusPendingRef = useRef(false);
+  const autoDisableUsageLimitPendingRef = useRef(false);
   const selectionCount = selectedFiles.size;
   const toggleSelect = useCallback((name: string) => {
     setSelectedFiles((prev) => {
@@ -163,14 +165,69 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
     setError('');
     try {
       const data = await authFilesApi.list();
-      setFiles(data?.files || []);
+      const nextFiles = data?.files || [];
+      setFiles(nextFiles);
+
+      if (autoDisableUsageLimitPendingRef.current) return;
+      const targets = nextFiles.filter(
+        (file) => !isRuntimeOnlyAuthFile(file) && file.disabled !== true && isUsageLimitReachedAuthFile(file)
+      );
+      if (targets.length === 0) return;
+
+      autoDisableUsageLimitPendingRef.current = true;
+      setStatusUpdating((prev) => {
+        const next = { ...prev };
+        targets.forEach((file) => {
+          next[file.name] = true;
+        });
+        return next;
+      });
+
+      const results = await Promise.allSettled(
+        targets.map((file) => authFilesApi.setStatus(file.name, true))
+      );
+      const confirmedDisabled = new Set<string>();
+      let failedCount = 0;
+      results.forEach((result, index) => {
+        const name = targets[index]?.name;
+        if (!name) return;
+        if (result.status === 'fulfilled' && result.value.disabled === true) {
+          confirmedDisabled.add(name);
+          return;
+        }
+        failedCount += 1;
+      });
+
+      if (confirmedDisabled.size > 0) {
+        setFiles((prev) =>
+          prev.map((file) =>
+            confirmedDisabled.has(file.name) ? { ...file, disabled: true } : file
+          )
+        );
+        showNotification(
+          t('auth_files.usage_limit_auto_disabled', { count: confirmedDisabled.size }),
+          failedCount > 0 ? 'warning' : 'success'
+        );
+      } else if (failedCount > 0) {
+        showNotification(t('auth_files.usage_limit_auto_disable_failed', { count: failedCount }), 'warning');
+      }
+
+      setStatusUpdating((prev) => {
+        const next = { ...prev };
+        targets.forEach((file) => {
+          delete next[file.name];
+        });
+        return next;
+      });
+      autoDisableUsageLimitPendingRef.current = false;
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : t('notification.refresh_failed');
       setError(errorMessage);
+      autoDisableUsageLimitPendingRef.current = false;
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [showNotification, t]);
 
   const handleUploadClick = useCallback(() => {
     fileInputRef.current?.click();

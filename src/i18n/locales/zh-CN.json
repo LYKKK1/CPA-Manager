@@ -1375,7 +1375,8 @@
     "calls": "调用数",
     "log_rows": "日志行",
     "codex_inspection_progress_eta": "预计 {{time}} 完成，剩余约 {{remaining}}",
-    "codex_inspection_progress_eta_calculating": "正在估算预计完成时间..."
+    "codex_inspection_progress_eta_calculating": "正在估算预计完成时间...",
+    "codex_inspection_action_refresh": "刷新"
   },
   "logs": {
     "title": "日志查看",

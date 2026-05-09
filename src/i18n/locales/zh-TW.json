@@ -1395,7 +1395,8 @@
     "calls": "呼叫數",
     "log_rows": "日誌行",
     "codex_inspection_progress_eta": "預計 {{time}} 完成，剩餘約 {{remaining}}",
-    "codex_inspection_progress_eta_calculating": "正在估算預計完成時間..."
+    "codex_inspection_progress_eta_calculating": "正在估算預計完成時間...",
+    "codex_inspection_action_refresh": "重新整理"
   },
   "logs": {
     "title": "記錄檢視",

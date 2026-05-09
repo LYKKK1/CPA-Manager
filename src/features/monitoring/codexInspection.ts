@@ -14,8 +14,8 @@ import {
 import { normalizeAuthIndex } from '@/utils/usage';
 
 export type CodexInspectionLogLevel = 'info' | 'success' | 'warning' | 'error';
-export type CodexInspectionAction = 'keep' | 'delete' | 'disable' | 'enable';
-export type CodexInspectionExecutionAction = Exclude<CodexInspectionAction, 'keep'>;
+export type CodexInspectionAction = 'keep' | 'delete' | 'disable' | 'enable' | 'refresh';
+export type CodexInspectionExecutionAction = 'delete' | 'disable' | 'enable';
 export type CodexInspectionProgressStatus = 'idle' | 'running' | 'paused' | 'stopped' | 'completed';
 
 export interface CodexInspectionSettings {

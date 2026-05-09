@@ -13,13 +13,18 @@ import json
 import os
 import sys
 import time
+import urllib.parse
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+CODEX_REFRESH_URL = "https://auth.openai.com/oauth/token"
+CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+CODEX_REDIRECT_URI = "http://localhost:1455/auth/callback"
 FIVE_HOUR_WINDOW_SECONDS = 18_000
 WEEK_WINDOW_SECONDS = 604_800
 DEFAULT_USER_AGENT = "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
@@ -38,6 +43,9 @@ class Settings:
     user_agent: str
     dry_run: bool
     history_path: str
+    enable_token_refresh: bool
+    refresh_threshold_days: float
+    refresh_disabled_only: bool
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -73,6 +81,9 @@ def read_settings() -> Settings:
         user_agent=os.getenv("CODEX_INSPECTION_USER_AGENT", DEFAULT_USER_AGENT).strip() or DEFAULT_USER_AGENT,
         dry_run=env_bool("CODEX_INSPECTION_DRY_RUN", False),
         history_path=os.getenv("CODEX_INSPECTION_HISTORY_PATH", DEFAULT_HISTORY_PATH).strip(),
+        enable_token_refresh=env_bool("CODEX_INSPECTION_ENABLE_TOKEN_REFRESH", False),
+        refresh_threshold_days=env_float("CODEX_INSPECTION_REFRESH_THRESHOLD_DAYS", 3.0),
+        refresh_disabled_only=env_bool("CODEX_INSPECTION_REFRESH_DISABLED_ONLY", True),
     )
 
 
@@ -193,6 +204,122 @@ def request_json(settings: Settings, method: str, path: str, payload: Any | None
         raise RuntimeError(f"{method} {path} failed: HTTP {exc.code} {body}") from exc
 
 
+def request_management_raw(settings: Settings, method: str, path: str, payload: Any | None = None) -> Any:
+    return request_json(settings, method, path, payload)
+
+
+def download_auth_file(settings: Settings, file_name: str) -> dict[str, Any] | None:
+    encoded = urllib.parse.urlencode({"name": file_name})
+    data = request_management_raw(settings, "GET", f"/auth-files/download?{encoded}")
+    return data if isinstance(data, dict) else None
+
+
+def upload_auth_file(settings: Settings, file_name: str, token_data: dict[str, Any]) -> None:
+    if settings.dry_run:
+        print(f"DRY-RUN upload refreshed token {file_name}")
+        return
+    data = json.dumps(token_data, ensure_ascii=False).encode("utf-8")
+    headers = {
+        "Authorization": f"Bearer {settings.management_key}",
+        "Content-Type": "application/json",
+    }
+    encoded = urllib.parse.urlencode({"name": file_name})
+    req = urllib.request.Request(
+        f"{settings.cpa_base_url}/v0/management/auth-files?{encoded}",
+        data=data,
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=settings.timeout_seconds) as resp:
+            resp.read()
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"POST /auth-files failed: HTTP {exc.code} {body}") from exc
+
+
+def refresh_codex_token(settings: Settings, refresh_token: str) -> dict[str, Any]:
+    payload = {
+        "redirect_uri": CODEX_REDIRECT_URI,
+        "grant_type": "refresh_token",
+        "client_id": CODEX_CLIENT_ID,
+        "refresh_token": refresh_token,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        CODEX_REFRESH_URL,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=settings.timeout_seconds) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            parsed = json.loads(body) if body.strip() else {}
+            return parsed if isinstance(parsed, dict) else {}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"token refresh failed: HTTP {exc.code} {body}") from exc
+
+
+def maybe_refresh_disabled_token(settings: Settings, file_item: dict[str, Any], action_after_quota: str) -> bool:
+    if not settings.enable_token_refresh:
+        return False
+    file_name = normalize_string(file_item.get("name"))
+    if not file_name:
+        return False
+    disabled = normalize_bool(file_item.get("disabled") or file_item.get("unavailable")) or action_after_quota == "disable"
+    if settings.refresh_disabled_only and not disabled:
+        return False
+
+    token_detail = download_auth_file(settings, file_name)
+    if not token_detail:
+        return False
+    refresh_token = normalize_string(token_detail.get("refresh_token") or token_detail.get("refreshToken"))
+    if not refresh_token:
+        return False
+    remaining = remaining_seconds_from_detail(token_detail)
+    threshold = settings.refresh_threshold_days * 86400
+    if remaining is not None and remaining > threshold:
+        return False
+
+    label = account_label(file_item)
+    result = {
+        "file": file_name,
+        "label": label,
+        "action": "refresh",
+        "reason": f"disabled token expires in {format_seconds(remaining)}, refresh threshold {settings.refresh_threshold_days:g}d",
+    }
+    record_history(settings, result, "issue")
+    try:
+        refreshed = refresh_codex_token(settings, refresh_token)
+        access_token = normalize_string(refreshed.get("access_token"))
+        if not access_token:
+            raise RuntimeError("refresh response missing access_token")
+        expires_in = number(refreshed.get("expires_in")) or 864000
+        now = datetime.now(timezone.utc)
+        next_data = dict(token_detail)
+        next_data.update(
+            {
+                "access_token": access_token,
+                "refresh_token": normalize_string(refreshed.get("refresh_token")) or refresh_token,
+                "id_token": refreshed.get("id_token") or token_detail.get("id_token"),
+                "last_refresh": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "expired": datetime.fromtimestamp(time.time() + expires_in, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+        )
+        upload_auth_file(settings, file_name, next_data)
+        if disabled:
+            set_disabled(settings, file_name, True)
+        record_history(settings, result, "execution", True)
+        print(f"{label} -> refresh: success, new expiry in {format_seconds(expires_in)}")
+        return True
+    except Exception as exc:
+        record_history(settings, result, "execution", False, str(exc))
+        print(f"ERROR refresh {label}: {exc}", file=sys.stderr)
+        return False
+
+
 def normalize_string(value: Any) -> str:
     if value is None:
         return ""
@@ -247,6 +374,67 @@ def account_id_from_jwt(token: str) -> str:
         or data.get("account_id")
         or data.get("accountId")
     )
+
+
+def jwt_payload(token: str) -> dict[str, Any]:
+    parts = token.split(".")
+    if len(parts) < 2:
+        return {}
+    payload = parts[1] + "=" * (-len(parts[1]) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(payload.encode("ascii"))
+        data = json.loads(decoded.decode("utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def token_remaining_seconds(access_token: str) -> float | None:
+    payload = jwt_payload(access_token)
+    exp = number(payload.get("exp"))
+    if exp is None:
+        return None
+    return exp - time.time()
+
+
+def parse_expired_remaining(value: str) -> float | None:
+    text = normalize_string(value)
+    if not text:
+        return None
+    try:
+        normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp() - time.time()
+    except Exception:
+        return None
+
+
+def remaining_seconds_from_detail(token_detail: dict[str, Any]) -> float | None:
+    remaining = parse_expired_remaining(normalize_string(token_detail.get("expired") or token_detail.get("expires_at") or token_detail.get("expiresAt")))
+    if remaining is not None:
+        return remaining
+    access_token = normalize_string(token_detail.get("access_token") or token_detail.get("accessToken"))
+    if access_token:
+        return token_remaining_seconds(access_token)
+    return None
+
+
+def format_seconds(seconds: float | None) -> str:
+    if seconds is None:
+        return "unknown"
+    if seconds < 0:
+        return "expired"
+    minutes = int(seconds // 60)
+    days = minutes // 1440
+    hours = (minutes % 1440) // 60
+    mins = minutes % 60
+    if days > 0:
+        return f"{days}d {hours}h"
+    if hours > 0:
+        return f"{hours}h {mins}m"
+    return f"{mins}m"
 
 
 def resolve_account_id(file_item: dict[str, Any]) -> str:
@@ -380,7 +568,7 @@ def main() -> int:
     targets = [item for item in files if isinstance(item, dict) and normalize_provider(item) == settings.target_type]
     print(f"Codex inspection: total_files={len(files)} target_accounts={len(targets)} dry_run={settings.dry_run}")
 
-    summary = {"delete": 0, "disable": 0, "enable": 0, "keep": 0, "failed": 0}
+    summary = {"delete": 0, "disable": 0, "enable": 0, "refresh": 0, "keep": 0, "failed": 0}
     for offset, item in enumerate(targets):
         try:
             result = inspect_account(settings, item)
@@ -405,6 +593,8 @@ def main() -> int:
                     raise
             elif action == "delete":
                 print(f"skip delete {file_name}: automatic deletion is disabled")
+            if maybe_refresh_disabled_token(settings, item, action):
+                summary["refresh"] += 1
         except Exception as exc:
             summary["failed"] += 1
             print(f"ERROR {account_label(item)}: {exc}", file=sys.stderr)

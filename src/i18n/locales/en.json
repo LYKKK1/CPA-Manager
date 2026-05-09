@@ -1374,7 +1374,8 @@
     "calls": "Calls",
     "log_rows": "Log Rows",
     "codex_inspection_progress_eta": "Estimated completion at {{time}}, about {{remaining}} remaining",
-    "codex_inspection_progress_eta_calculating": "Estimating completion time..."
+    "codex_inspection_progress_eta_calculating": "Estimating completion time...",
+    "codex_inspection_action_refresh": "Refresh"
   },
   "logs": {
     "title": "Logs Viewer",

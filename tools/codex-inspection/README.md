@@ -6,6 +6,14 @@ Safety rule: the script never deletes accounts. It only auto-disables quota-exha
 
 The script writes the latest 10 issue/action history records to `/root/cliproxyapi/static/codex-inspection-history.json` by default. When CPA serves `management.html`, the frontend can read this static JSON file and show timer inspection history without Usage Service.
 
+Optional token keepalive refresh can be enabled for disabled Codex auth files that are close to expiry. This does not delete accounts and keeps refreshed files disabled after upload:
+
+```bash
+CODEX_INSPECTION_ENABLE_TOKEN_REFRESH=true
+CODEX_INSPECTION_REFRESH_THRESHOLD_DAYS=3
+CODEX_INSPECTION_REFRESH_DISABLED_ONLY=true
+```
+
 ## Install
 
 Copy files to the server:

@@ -84,6 +84,7 @@ const actionToneClass: Record<CodexInspectionAction, string> = {
   delete: styles.actionDelete,
   disable: styles.actionDisable,
   enable: styles.actionEnable,
+  refresh: styles.actionEnable,
 };
 
 const levelClassMap: Record<CodexInspectionLogLevel, string> = {
@@ -122,6 +123,8 @@ const formatActionLabel = (action: CodexInspectionAction, t: ReturnType<typeof u
       return t('monitoring.codex_inspection_action_disable');
     case 'enable':
       return t('monitoring.codex_inspection_action_enable');
+    case 'refresh':
+      return t('monitoring.codex_inspection_action_refresh');
     case 'keep':
     default:
       return t('monitoring.codex_inspection_action_keep');
@@ -185,7 +188,7 @@ const normalizeInspectionHistoryEntry = (entry: unknown): InspectionHistoryEntry
   ) {
     return null;
   }
-  if (!['keep', 'delete', 'disable', 'enable'].includes(item.action)) return null;
+  if (!['keep', 'delete', 'disable', 'enable', 'refresh'].includes(item.action)) return null;
   if (!['issue', 'execution'].includes(item.kind)) return null;
   if (!['inspection', 'manual', 'auto', 'timer'].includes(item.source)) return null;
   const timestamp = typeof item.timestamp === 'number' && Number.isFinite(item.timestamp) ? item.timestamp : Date.now();

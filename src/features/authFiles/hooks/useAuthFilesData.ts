@@ -13,7 +13,6 @@ import {
   isUsageLimitReachedAuthFile,
   isRuntimeOnlyAuthFile,
 } from '@/features/authFiles/constants';
-import { loadCodexAuthFileDetails } from '@/features/authFiles/codexTokenRefresh';
 
 type DeleteAllOptions = {
   filter: string;
@@ -171,7 +170,7 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
     setError('');
     try {
       const data = await authFilesApi.list();
-      const nextFiles = await loadCodexAuthFileDetails(data?.files || []);
+      const nextFiles = data?.files || [];
       setFiles(nextFiles);
 
       if (autoDisableUsageLimitPendingRef.current) return;

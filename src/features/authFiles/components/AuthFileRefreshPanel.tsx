@@ -110,8 +110,6 @@ export function AuthFileRefreshPanel({
         </Button>
       </div>
 
-      <div className={styles.refreshPanelHint}>{t('auth_files.refresh_panel_detail_hint')}</div>
-
       <div className={styles.refreshPanelStats}>
         <span>{t('auth_files.refresh_panel_total', { count: items.length })}</span>
         <span>{t('auth_files.refresh_panel_disabled', { count: disabledCount })}</span>

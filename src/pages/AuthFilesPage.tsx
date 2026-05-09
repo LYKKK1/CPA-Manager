@@ -43,6 +43,7 @@ import {
 import {
   CODEX_TOKEN_SOON_MS,
   isCodexAuthFile,
+  loadCodexAuthFileDetails,
   mergeAuthFileDetail,
   refreshCodexTokenDetail,
 } from '@/features/authFiles/codexTokenRefresh';
@@ -515,7 +516,11 @@ export function AuthFilesPage() {
   const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const start = (currentPage - 1) * pageSize;
-  const pageItems = sorted.slice(start, start + pageSize);
+  const pageItems = useMemo(() => sorted.slice(start, start + pageSize), [sorted, start, pageSize]);
+  const visibleCodexDetailKey = useMemo(
+    () => pageItems.filter((file) => isCodexAuthFile(file) && !getAuthFileExpiryMs(file)).map((file) => file.name).join('|'),
+    [pageItems]
+  );
   const selectablePageItems = useMemo(
     () => pageItems.filter((file) => !isRuntimeOnlyAuthFile(file)),
     [pageItems]
@@ -534,6 +539,21 @@ export function AuthFilesPage() {
     selectedNames.length === 0 ||
     batchStatusUpdating ||
     selectedHasStatusUpdating;
+
+  useEffect(() => {
+    const targets = pageItems.filter((file) => isCodexAuthFile(file) && !getAuthFileExpiryMs(file));
+    if (targets.length === 0) return;
+    let cancelled = false;
+    void loadCodexAuthFileDetails(targets).then((detailedFiles) => {
+      if (cancelled) return;
+      detailedFiles.forEach((file) => {
+        if (getAuthFileExpiryMs(file)) updateFile(file);
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pageItems, updateFile, visibleCodexDetailKey]);
 
   const copyTextWithNotification = useCallback(
     async (text: string) => {

@@ -273,6 +273,7 @@ export function AuthFileCard(props: AuthFileCardProps) {
                 <Button
                   variant="secondary"
                   size="sm"
+                  className={styles.tokenRefreshButton}
                   onClick={() => onRefreshCodexToken(file)}
                   disabled={disableControls || tokenRefreshing[file.name] === true}
                   loading={tokenRefreshing[file.name] === true}

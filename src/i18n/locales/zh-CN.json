@@ -1259,7 +1259,7 @@
     "codex_inspection_current_state": "当前状态",
     "codex_inspection_http_status": "HTTP 状态",
     "codex_inspection_used_percent": "额度使用率",
-    "codex_inspection_weekly_usd": "周额度美元",
+    "codex_inspection_weekly_usd": "周美元估算",
     "codex_inspection_weekly_used_usd": "已用",
     "codex_inspection_weekly_remaining_usd_total": "周剩余美元",
     "codex_inspection_next_action": "建议动作",

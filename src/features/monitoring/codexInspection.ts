@@ -437,20 +437,6 @@ const getWindowUsedPercent = (window?: CodexUsageWindow | null) =>
 const getWindowSeconds = (window?: CodexUsageWindow | null) =>
   normalizeNumberValue(window?.limit_window_seconds ?? window?.limitWindowSeconds);
 
-const getWindowResetAfterSeconds = (window?: CodexUsageWindow | null) =>
-  normalizeNumberValue(window?.reset_after_seconds ?? window?.resetAfterSeconds);
-
-const getWindowResetAtMs = (window?: CodexUsageWindow | null) => {
-  const raw = window?.reset_at ?? window?.resetAt;
-  const numeric = normalizeNumberValue(raw);
-  if (numeric !== null) return numeric < 1e12 ? numeric * 1000 : numeric;
-  if (typeof raw === 'string') {
-    const parsed = Date.parse(raw);
-    return Number.isNaN(parsed) ? null : parsed;
-  }
-  return null;
-};
-
 const getLimitWindows = (rateLimit?: CodexRateLimitInfo | null) => [
   rateLimit?.primary_window ?? rateLimit?.primaryWindow ?? null,
   rateLimit?.secondary_window ?? rateLimit?.secondaryWindow ?? null,
@@ -506,60 +492,24 @@ const isRateLimitReached = (rateLimit?: CodexRateLimitInfo | null) => {
 
 const creditsToUsd = (credits: number | null) => (credits === null ? null : (credits / 1000) * 40);
 
-const getCurrentWeekRange = (weeklyWindow?: CodexUsageWindow | null) => {
-  const now = new Date();
-  const endFromResetAt = getWindowResetAtMs(weeklyWindow);
-  const resetAfterSeconds = getWindowResetAfterSeconds(weeklyWindow);
-  const endMs = endFromResetAt ?? now.getTime() + (resetAfterSeconds ?? WEEK_WINDOW_SECONDS) * 1000;
-  const startMs = endMs - WEEK_WINDOW_SECONDS * 1000;
-  const format = (value: number) => new Date(value).toISOString().slice(0, 10);
-  return { startDate: format(startMs), endDate: format(Math.min(endMs, now.getTime())) };
-};
-
-const sumNumericFields = (value: unknown, matcher: (key: string) => boolean): number => {
-  if (Array.isArray(value)) {
-    return value.reduce((total, item) => total + sumNumericFields(item, matcher), 0);
+const getWindowCredits = (window?: CodexUsageWindow | null): number | null => {
+  if (!window) return null;
+  const record = window as Record<string, unknown>;
+  const candidates = [
+    'credits',
+    'credit',
+    'used_credits',
+    'usedCredits',
+    'credits_used',
+    'creditsUsed',
+    'total_credits',
+    'totalCredits',
+  ];
+  for (const key of candidates) {
+    const value = normalizeNumberValue(record[key]);
+    if (value !== null) return value;
   }
-  if (!value || typeof value !== 'object') return 0;
-  return Object.entries(value as Record<string, unknown>).reduce((total, [key, entry]) => {
-    const numeric = normalizeNumberValue(entry);
-    if (numeric !== null && matcher(key)) return total + numeric;
-    if (entry && typeof entry === 'object') return total + sumNumericFields(entry, matcher);
-    return total;
-  }, 0);
-};
-
-const extractAnalyticsCredits = (payload: unknown): number | null => {
-  const totalCredits = sumNumericFields(payload, (key) => {
-    const normalized = key.toLowerCase();
-    return normalized.includes('credit') && !normalized.includes('usd') && !normalized.includes('dollar');
-  });
-  return totalCredits > 0 ? totalCredits : null;
-};
-
-const fetchWeeklyCreditUsage = async (
-  account: CodexInspectionAccount,
-  settings: CodexInspectionSettings,
-  weeklyWindow: CodexUsageWindow | null,
-  headers: Record<string, string>,
-  requestConfig: AxiosRequestConfig
-): Promise<number | null> => {
-  if (!account.authIndex) return null;
-  const { startDate, endDate } = getCurrentWeekRange(weeklyWindow);
-  const url = `https://chatgpt.com/backend-api/wham/analytics/daily-workspace-usage-counts?start_date=${startDate}&end_date=${endDate}&group_by=day`;
-  const result = await withRetry(settings.retries, () =>
-    apiCallApi.request(
-      {
-        authIndex: account.authIndex ?? undefined,
-        method: 'GET',
-        url,
-        header: headers,
-      },
-      requestConfig
-    )
-  );
-  if (!result.hasStatusCode || result.statusCode < 200 || result.statusCode >= 300) return null;
-  return extractAnalyticsCredits(result.body ?? result.bodyText);
+  return null;
 };
 
 const buildWeeklyDollarEstimate = (usedCredits: number | null, usedPercent: number | null) => {
@@ -800,13 +750,7 @@ const inspectSingleAccount = async (
             ? 'success'
             : 'info';
     const percentText = decision.usedPercent === null ? '--' : `${decision.usedPercent.toFixed(1)}%`;
-    const weeklyUsedCredits = await fetchWeeklyCreditUsage(
-      account,
-      settings,
-      weeklyWindow,
-      headers,
-      requestConfig
-    ).catch(() => null);
+    const weeklyUsedCredits = getWindowCredits(weeklyWindow);
     const weeklyDollarEstimate = buildWeeklyDollarEstimate(weeklyUsedCredits, decision.usedPercent);
     const remainingText =
       weeklyDollarEstimate.weeklyRemainingUsd === null ? '--' : `$${weeklyDollarEstimate.weeklyRemainingUsd.toFixed(2)}`;

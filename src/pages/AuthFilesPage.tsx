@@ -30,6 +30,7 @@ import {
   QUOTA_PROVIDER_TYPES,
   clampCardPageSize,
   getAuthFileIcon,
+  getAuthFileExpiryMs,
   getTypeColor,
   getTypeLabel,
   hasAuthFileStatusMessage,
@@ -39,6 +40,12 @@ import {
   type QuotaProviderType,
   type ResolvedTheme,
 } from '@/features/authFiles/constants';
+import {
+  CODEX_TOKEN_SOON_MS,
+  isCodexAuthFile,
+  mergeAuthFileDetail,
+  refreshCodexTokenDetail,
+} from '@/features/authFiles/codexTokenRefresh';
 import { AuthFileCard } from '@/features/authFiles/components/AuthFileCard';
 import { AuthFileModelsModal } from '@/features/authFiles/components/AuthFileModelsModal';
 import { AuthFilesPrefixProxyEditorModal } from '@/features/authFiles/components/AuthFilesPrefixProxyEditorModal';
@@ -58,6 +65,8 @@ import {
   type AuthFilesSortMode,
 } from '@/features/authFiles/uiState';
 import { useAuthStore, useNotificationStore, useThemeStore } from '@/stores';
+import { authFilesApi } from '@/services/api';
+import type { AuthFileItem } from '@/types';
 import styles from './AuthFilesPage.module.scss';
 
 const easePower3Out = (progress: number) => 1 - (1 - progress) ** 4;
@@ -99,6 +108,7 @@ export function AuthFilesPage() {
   const [pageSizeInput, setPageSizeInput] = useState('9');
   const [viewMode, setViewMode] = useState<'diagram' | 'list'>('list');
   const [sortMode, setSortMode] = useState<AuthFilesSortMode>('default');
+  const [tokenRefreshing, setTokenRefreshing] = useState<Record<string, boolean>>({});
   const [batchActionBarVisible, setBatchActionBarVisible] = useState(false);
   const [uiStateHydrated, setUiStateHydrated] = useState(false);
   const floatingBatchActionsRef = useRef<HTMLDivElement>(null);
@@ -132,6 +142,7 @@ export function AuthFilesPage() {
     batchDownload,
     batchSetStatus,
     batchDelete,
+    updateFile,
   } = useAuthFilesData();
 
   const statusBarCache = useAuthFilesStatusBarCache(files);
@@ -336,6 +347,66 @@ export function AuthFilesPage() {
     await Promise.all([loadFiles(), loadExcluded(), loadModelAlias()]);
   }, [loadFiles, loadExcluded, loadModelAlias]);
 
+  const handleRefreshCodexToken = useCallback(
+    async (file: AuthFileItem) => {
+      const name = file.name;
+      const wasDisabled = file.disabled === true;
+      setTokenRefreshing((previous) => ({ ...previous, [name]: true }));
+      try {
+        if (wasDisabled) {
+          await authFilesApi.setStatus(name, false);
+        }
+        const detail = await authFilesApi.downloadJsonObject(name);
+        const refreshed = await refreshCodexTokenDetail(detail);
+        await authFilesApi.saveJsonObject(name, refreshed);
+        if (wasDisabled) {
+          await authFilesApi.setStatus(name, true);
+        }
+        updateFile(mergeAuthFileDetail({ ...file, disabled: wasDisabled }, refreshed));
+        showNotification(t('auth_files.refresh_panel_refresh_now_success', { name }), 'success');
+      } catch (error) {
+        if (wasDisabled) {
+          try {
+            await authFilesApi.setStatus(name, true);
+          } catch {
+            // best-effort rollback
+          }
+        }
+        showNotification(
+          t('auth_files.refresh_panel_refresh_now_failed', {
+            name,
+            message: error instanceof Error ? error.message : String(error || t('common.unknown_error')),
+          }),
+          'error'
+        );
+      } finally {
+        setTokenRefreshing((previous) => {
+          const next = { ...previous };
+          delete next[name];
+          return next;
+        });
+      }
+    },
+    [showNotification, t, updateFile]
+  );
+
+  const handleDetectSoonCodexTokens = useCallback(() => {
+    const now = Date.now();
+    const soonFiles = files.filter((file) => {
+      if (!isCodexAuthFile(file) || isRuntimeOnlyAuthFile(file)) return false;
+      const expiry = getAuthFileExpiryMs(file);
+      return expiry !== null && expiry - now <= CODEX_TOKEN_SOON_MS;
+    });
+    setFilter('codex');
+    setSortMode('codex-expiry');
+    setPage(1);
+    if (soonFiles.length === 0) {
+      showNotification(t('auth_files.codex_token_soon_none'), 'success');
+      return;
+    }
+    showNotification(t('auth_files.codex_token_soon_found', { count: soonFiles.length }), 'warning');
+  }, [files, showNotification, t]);
+
   useHeaderRefresh(handleHeaderRefresh);
 
   useEffect(() => {
@@ -378,6 +449,7 @@ export function AuthFilesPage() {
       { value: 'default', label: t('auth_files.sort_default') },
       { value: 'az', label: t('auth_files.sort_az') },
       { value: 'priority', label: t('auth_files.sort_priority') },
+      { value: 'codex-expiry', label: t('auth_files.sort_codex_expiry') },
     ],
     [t]
   );
@@ -428,6 +500,13 @@ export function AuthFilesPage() {
         const pa = parsePriorityValue(a.priority ?? a['priority']) ?? 0;
         const pb = parsePriorityValue(b.priority ?? b['priority']) ?? 0;
         return pb - pa; // 高优先级排前面
+      });
+    } else if (sortMode === 'codex-expiry') {
+      copy.sort((a, b) => {
+        const expiryA = isCodexAuthFile(a) ? (getAuthFileExpiryMs(a) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+        const expiryB = isCodexAuthFile(b) ? (getAuthFileExpiryMs(b) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+        if (expiryA !== expiryB) return expiryA - expiryB;
+        return a.name.localeCompare(b.name);
       });
     }
     return copy;
@@ -765,6 +844,16 @@ export function AuthFilesPage() {
                   <label>{t('auth_files.display_options_label')}</label>
                   <div className={styles.filterToggleGroup}>
                     <div className={styles.filterToggleCard}>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={handleDetectSoonCodexTokens}
+                        disabled={disableControls || loading}
+                      >
+                        {t('auth_files.codex_token_detect_soon_button')}
+                      </Button>
+                    </div>
+                    <div className={styles.filterToggleCard}>
                       <ToggleSwitch
                         checked={problemOnly}
                         onChange={(value) => {
@@ -867,6 +956,8 @@ export function AuthFilesPage() {
                     onDelete={handleDelete}
                     onToggleStatus={handleStatusToggle}
                     onToggleSelect={toggleSelect}
+                    onRefreshCodexToken={handleRefreshCodexToken}
+                    tokenRefreshing={tokenRefreshing}
                   />
                 ))}
               </div>

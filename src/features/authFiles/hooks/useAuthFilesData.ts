@@ -13,6 +13,7 @@ import {
   isUsageLimitReachedAuthFile,
   isRuntimeOnlyAuthFile,
 } from '@/features/authFiles/constants';
+import { loadCodexAuthFileDetails } from '@/features/authFiles/codexTokenRefresh';
 
 type DeleteAllOptions = {
   filter: string;
@@ -49,6 +50,7 @@ export type UseAuthFilesDataResult = {
   batchDownload: (names: string[]) => Promise<void>;
   batchSetStatus: (names: string[], enabled: boolean) => Promise<void>;
   batchDelete: (names: string[]) => void;
+  updateFile: (file: AuthFileItem) => void;
 };
 
 export function useAuthFilesData(): UseAuthFilesDataResult {
@@ -79,6 +81,10 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
       }
       return next;
     });
+  }, []);
+
+  const updateFile = useCallback((nextFile: AuthFileItem) => {
+    setFiles((prev) => prev.map((file) => (file.name === nextFile.name ? nextFile : file)));
   }, []);
 
   const selectAllVisible = useCallback((visibleFiles: AuthFileItem[]) => {
@@ -165,7 +171,7 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
     setError('');
     try {
       const data = await authFilesApi.list();
-      const nextFiles = data?.files || [];
+      const nextFiles = await loadCodexAuthFileDetails(data?.files || []);
       setFiles(nextFiles);
 
       if (autoDisableUsageLimitPendingRef.current) return;
@@ -711,5 +717,6 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
     batchDownload,
     batchSetStatus,
     batchDelete,
+    updateFile,
   };
 }

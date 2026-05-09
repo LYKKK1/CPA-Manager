@@ -24,6 +24,8 @@ import {
   QUOTA_PROVIDER_TYPES,
   formatModified,
   getAuthFileIcon,
+  getAuthFileExpiryMs,
+  getAuthFileLastRefreshMs,
   getAuthFileStatusMessage,
   getTypeColor,
   getTypeLabel,
@@ -32,6 +34,7 @@ import {
   type QuotaProviderType,
   type ResolvedTheme,
 } from '@/features/authFiles/constants';
+import { isCodexAuthFile } from '@/features/authFiles/codexTokenRefresh';
 import type { AuthFileStatusBarData } from '@/features/authFiles/hooks/useAuthFilesStatusBarCache';
 import { AuthFileQuotaSection } from '@/features/authFiles/components/AuthFileQuotaSection';
 import styles from '@/pages/AuthFilesPage.module.scss';
@@ -54,7 +57,23 @@ export type AuthFileCardProps = {
   onDelete: (name: string) => void;
   onToggleStatus: (file: AuthFileItem, enabled: boolean) => void;
   onToggleSelect: (name: string) => void;
+  onRefreshCodexToken?: (file: AuthFileItem) => void;
+  tokenRefreshing?: Record<string, boolean>;
 };
+
+const formatTokenDistance = (milliseconds: number) => {
+  const abs = Math.abs(milliseconds);
+  const totalMinutes = Math.max(1, Math.round(abs / 60_000));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return hours > 0 ? `${days}天 ${hours}小时` : `${days}天`;
+  if (hours > 0) return minutes > 0 ? `${hours}小时 ${minutes}分钟` : `${hours}小时`;
+  return `${minutes}分钟`;
+};
+
+const formatTokenTime = (value: number | null, locale: string) =>
+  value ? new Date(value).toLocaleString(locale) : '--';
 
 const resolveQuotaType = (file: AuthFileItem): QuotaProviderType | null => {
   const provider = resolveAuthProvider(file);
@@ -63,7 +82,7 @@ const resolveQuotaType = (file: AuthFileItem): QuotaProviderType | null => {
 };
 
 export function AuthFileCard(props: AuthFileCardProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const {
     file,
     compact,
@@ -80,6 +99,8 @@ export function AuthFileCard(props: AuthFileCardProps) {
     onDelete,
     onToggleStatus,
     onToggleSelect,
+    onRefreshCodexToken,
+    tokenRefreshing = {},
   } = props;
 
   const recentBuckets = normalizeRecentRequestBuckets(file.recent_requests ?? file.recentRequests);
@@ -122,6 +143,11 @@ export function AuthFileCard(props: AuthFileCardProps) {
     Boolean(rawStatusMessage) && !HEALTHY_STATUS_MESSAGES.has(rawStatusMessage.toLowerCase());
 
   const priorityValue = parsePriorityValue(file.priority ?? file['priority']);
+  const isCodexFile = isCodexAuthFile(file);
+  const tokenExpiryMs = isCodexFile ? getAuthFileExpiryMs(file) : null;
+  const tokenLastRefreshMs = isCodexFile ? getAuthFileLastRefreshMs(file) : null;
+  const tokenRemainingMs = tokenExpiryMs ? tokenExpiryMs - Date.now() : null;
+  const tokenExpired = tokenRemainingMs !== null && tokenRemainingMs <= 0;
   const noteValue = typeof file.note === 'string' ? file.note.trim() : '';
   const stateLabel = isRuntimeOnly
     ? t('auth_files.type_virtual') || '虚拟认证文件'
@@ -225,6 +251,35 @@ export function AuthFileCard(props: AuthFileCardProps) {
             <div className={styles.healthStatusMessage} title={rawStatusMessage}>
               <IconInfo className={styles.messageIcon} size={14} />
               <span>{rawStatusMessage}</span>
+            </div>
+          )}
+
+          {isCodexFile && (
+            <div className={`${styles.tokenMetaPanel} ${tokenExpired ? styles.tokenMetaPanelExpired : ''}`}>
+              <div className={styles.tokenMetaText}>
+                <span>
+                  {t('auth_files.codex_token_expiry_card', {
+                    time: formatTokenTime(tokenExpiryMs, i18n.language),
+                    remaining: tokenRemainingMs == null ? '--' : formatTokenDistance(tokenRemainingMs),
+                  })}
+                </span>
+                <span>
+                  {t('auth_files.codex_token_last_refresh_card', {
+                    time: formatTokenTime(tokenLastRefreshMs, i18n.language),
+                  })}
+                </span>
+              </div>
+              {onRefreshCodexToken ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onRefreshCodexToken(file)}
+                  disabled={disableControls || tokenRefreshing[file.name] === true}
+                  loading={tokenRefreshing[file.name] === true}
+                >
+                  {t('auth_files.refresh_panel_refresh_now_button')}
+                </Button>
+              ) : null}
             </div>
           )}
 

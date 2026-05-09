@@ -533,6 +533,7 @@
     "sort_default": "默认",
     "sort_az": "A-Z 名称",
     "sort_priority": "优先级",
+    "sort_codex_expiry": "Codex 到期时间",
     "priority_display": "优先级",
     "page_size_label": "单页数量",
     "page_size_unit": "个/页",
@@ -643,7 +644,12 @@
     "refresh_panel_refresh_now_success": "已立即刷新 \"{{name}}\" 的 Token",
     "refresh_panel_refresh_now_failed": "立即刷新 \"{{name}}\" 失败：{{message}}",
     "refresh_panel_enable_button": "启用刷新",
-    "refresh_panel_empty": "当前没有需要提醒的 Token 刷新项。"
+    "refresh_panel_empty": "当前没有需要提醒的 Token 刷新项。",
+    "codex_token_expiry_card": "到期：{{time}}（{{remaining}}）",
+    "codex_token_last_refresh_card": "最近刷新：{{time}}",
+    "codex_token_detect_soon_button": "检测两天内到期 Codex",
+    "codex_token_soon_none": "没有发现两天内到期的 Codex 凭证",
+    "codex_token_soon_found": "发现 {{count}} 个两天内到期的 Codex 凭证，已按到期时间排序"
   },
   "antigravity_quota": {
     "title": "Antigravity 额度",

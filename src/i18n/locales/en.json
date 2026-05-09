@@ -533,6 +533,7 @@
     "sort_default": "Default",
     "sort_az": "A-Z Name",
     "sort_priority": "Priority",
+    "sort_codex_expiry": "Codex expiry",
     "priority_display": "Priority",
     "page_size_label": "Per page",
     "page_size_unit": "items",
@@ -643,7 +644,12 @@
     "refresh_panel_refresh_now_success": "Token refreshed for \"{{name}}\"",
     "refresh_panel_refresh_now_failed": "Failed to refresh token for \"{{name}}\": {{message}}",
     "refresh_panel_enable_button": "Enable refresh",
-    "refresh_panel_empty": "No token refresh reminders right now."
+    "refresh_panel_empty": "No token refresh reminders right now.",
+    "codex_token_expiry_card": "Expires: {{time}} ({{remaining}})",
+    "codex_token_last_refresh_card": "Last refresh: {{time}}",
+    "codex_token_detect_soon_button": "Find Codex expiring in 2 days",
+    "codex_token_soon_none": "No Codex credentials expiring within 2 days",
+    "codex_token_soon_found": "Found {{count}} Codex credentials expiring within 2 days; sorted by expiry"
   },
   "antigravity_quota": {
     "title": "Antigravity Quota",

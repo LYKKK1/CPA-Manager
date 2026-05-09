@@ -1163,6 +1163,32 @@
   margin-top: 1px;
 }
 
+.tokenMetaPanel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 12px;
+  background: var(--bg-secondary);
+}
+
+.tokenMetaPanelExpired {
+  border-color: color-mix(in srgb, var(--warning-border) 70%, transparent);
+  background: color-mix(in srgb, var(--warning-bg) 60%, transparent);
+}
+
+.tokenMetaText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .cardInsights {
   display: flex;
   flex-direction: column;

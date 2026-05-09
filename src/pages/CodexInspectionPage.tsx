@@ -25,43 +25,26 @@ import {
   type CodexInspectionAction,
   type CodexInspectionConfigurableSettings,
   type CodexInspectionLogLevel,
-  type CodexInspectionProgressSnapshot,
   type CodexInspectionResultItem,
   type CodexInspectionRunResult,
   type CodexInspectionSession,
 } from '@/features/monitoring/codexInspection';
-import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
+import {
+  createIdleCodexInspectionProgress,
+  useAuthStore,
+  useCodexInspectionStore,
+  useConfigStore,
+  useNotificationStore,
+  type CodexInspectionExecutionTriggerSource,
+  type CodexInspectionHistoryEntry,
+} from '@/stores';
 import styles from './CodexInspectionPage.module.scss';
-
-type RunStatus = 'idle' | 'running' | 'paused' | 'success' | 'error';
-
-type InspectionLogEntry = {
-  id: string;
-  level: CodexInspectionLogLevel;
-  message: string;
-  timestamp: number;
-};
-
-type ExecutionTriggerSource = 'manual' | 'auto';
 
 type SummaryCard = {
   key: string;
   label: string;
   value: string;
   tone?: 'neutral' | 'good' | 'warn' | 'bad';
-};
-
-type InspectionHistoryEntry = {
-  id: string;
-  timestamp: number;
-  fileName: string;
-  account: string;
-  action: CodexInspectionAction;
-  reason: string;
-  kind: 'issue' | 'execution';
-  source: ExecutionTriggerSource | 'inspection' | 'timer';
-  success?: boolean;
-  error?: string;
 };
 
 type InspectionSettingsDraft = {
@@ -97,6 +80,10 @@ const levelClassMap: Record<CodexInspectionLogLevel, string> = {
 const CODEX_INSPECTION_HISTORY_STORAGE_KEY = 'cli-proxy-codex-inspection-history-v1';
 const CODEX_INSPECTION_SERVER_HISTORY_PATH = '/codex-inspection-history.json';
 const CODEX_INSPECTION_HISTORY_LIMIT = 10;
+
+let codexInspectionLogCounter = 0;
+let codexInspectionSession: CodexInspectionSession | null = null;
+let activeCodexInspectionSessionId: string | null = null;
 
 const formatTimestamp = (value: number, locale: string) => new Date(value).toLocaleString(locale);
 
@@ -155,7 +142,7 @@ const countActions = (items: CodexInspectionResultItem[]) => {
 const isAutoExecutableAction = (item: CodexInspectionResultItem) =>
   item.action === 'disable' || item.action === 'enable';
 
-const loadInspectionHistoryEntries = (): InspectionHistoryEntry[] => {
+const loadInspectionHistoryEntries = (): CodexInspectionHistoryEntry[] => {
   if (typeof localStorage === 'undefined') return [];
   try {
     const raw = localStorage.getItem(CODEX_INSPECTION_HISTORY_STORAGE_KEY);
@@ -168,16 +155,16 @@ const loadInspectionHistoryEntries = (): InspectionHistoryEntry[] => {
   }
 };
 
-const persistInspectionHistoryEntries = (entries: InspectionHistoryEntry[]) => {
+const persistInspectionHistoryEntries = (entries: CodexInspectionHistoryEntry[]) => {
   if (typeof localStorage === 'undefined') return;
   localStorage.setItem(CODEX_INSPECTION_HISTORY_STORAGE_KEY, JSON.stringify(entries));
 };
 
-const trimInspectionHistoryEntries = (entries: InspectionHistoryEntry[]) => entries.slice(0, CODEX_INSPECTION_HISTORY_LIMIT);
+const trimInspectionHistoryEntries = (entries: CodexInspectionHistoryEntry[]) => entries.slice(0, CODEX_INSPECTION_HISTORY_LIMIT);
 
-const normalizeInspectionHistoryEntry = (entry: unknown): InspectionHistoryEntry | null => {
+const normalizeInspectionHistoryEntry = (entry: unknown): CodexInspectionHistoryEntry | null => {
   if (!entry || typeof entry !== 'object') return null;
-  const item = entry as Partial<InspectionHistoryEntry>;
+  const item = entry as Partial<CodexInspectionHistoryEntry>;
   if (
     typeof item.fileName !== 'string' ||
     typeof item.account !== 'string' ||
@@ -199,24 +186,24 @@ const normalizeInspectionHistoryEntry = (entry: unknown): InspectionHistoryEntry
     account: item.account,
     action: item.action as CodexInspectionAction,
     reason: item.reason,
-    kind: item.kind as InspectionHistoryEntry['kind'],
-    source: item.source as InspectionHistoryEntry['source'],
+    kind: item.kind as CodexInspectionHistoryEntry['kind'],
+    source: item.source as CodexInspectionHistoryEntry['source'],
     success: typeof item.success === 'boolean' ? item.success : undefined,
     error: typeof item.error === 'string' ? item.error : undefined,
   };
 };
 
-const isInspectionHistoryEntry = (entry: InspectionHistoryEntry | null): entry is InspectionHistoryEntry =>
+const isInspectionHistoryEntry = (entry: CodexInspectionHistoryEntry | null): entry is CodexInspectionHistoryEntry =>
   entry !== null;
 
-const historyEntryKey = (entry: InspectionHistoryEntry) =>
+const historyEntryKey = (entry: CodexInspectionHistoryEntry) =>
   `${entry.fileName}\n${entry.action}\n${entry.reason}\n${entry.source}`;
 
 const mergeHistoryEntries = (
-  previous: InspectionHistoryEntry[],
-  incoming: InspectionHistoryEntry[]
-): InspectionHistoryEntry[] => {
-  const map = new Map<string, InspectionHistoryEntry>();
+  previous: CodexInspectionHistoryEntry[],
+  incoming: CodexInspectionHistoryEntry[]
+): CodexInspectionHistoryEntry[] => {
+  const map = new Map<string, CodexInspectionHistoryEntry>();
   [...previous, ...incoming].forEach((entry) => {
     const key = historyEntryKey(entry);
     const existing = map.get(key);
@@ -229,7 +216,7 @@ const mergeHistoryEntries = (
   );
 };
 
-const createIssueHistoryEntries = (items: CodexInspectionResultItem[]): InspectionHistoryEntry[] =>
+const createIssueHistoryEntries = (items: CodexInspectionResultItem[]): CodexInspectionHistoryEntry[] =>
   items.map((item) => ({
     id: `issue-${item.fileName}-${item.action}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     timestamp: Date.now(),
@@ -242,9 +229,9 @@ const createIssueHistoryEntries = (items: CodexInspectionResultItem[]): Inspecti
   }));
 
 const mergeExecutionHistoryEntries = (
-  previous: InspectionHistoryEntry[],
-  executions: InspectionHistoryEntry[]
-): InspectionHistoryEntry[] => {
+  previous: CodexInspectionHistoryEntry[],
+  executions: CodexInspectionHistoryEntry[]
+): CodexInspectionHistoryEntry[] => {
   const next = [...previous];
 
   executions.forEach((executionEntry) => {
@@ -271,26 +258,6 @@ const mergeExecutionHistoryEntries = (
   next.sort((left, right) => right.timestamp - left.timestamp);
   return mergeHistoryEntries([], next);
 };
-
-const createIdleProgressSnapshot = (): CodexInspectionProgressSnapshot => ({
-  total: 0,
-  completed: 0,
-  inFlight: 0,
-  pending: 0,
-  percent: 0,
-  status: 'idle',
-  summary: {
-    totalFiles: 0,
-    probeSetCount: 0,
-    sampledCount: 0,
-    deleteCount: 0,
-    disableCount: 0,
-    enableCount: 0,
-    keepCount: 0,
-  },
-  startedAt: Date.now(),
-  updatedAt: Date.now(),
-});
 
 const formatEtaDuration = (milliseconds: number) => {
   const totalMinutes = Math.max(1, Math.round(milliseconds / 60_000));
@@ -327,24 +294,33 @@ export function CodexInspectionPage() {
     toSettingsDraft(loadCodexInspectionConfigurableSettings(config))
   );
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [logs, setLogs] = useState<InspectionLogEntry[]>([]);
-  const [logsCollapsed, setLogsCollapsed] = useState(false);
-  const [runStatus, setRunStatus] = useState<RunStatus>('idle');
-  const [progress, setProgress] = useState<CodexInspectionProgressSnapshot>(createIdleProgressSnapshot);
-  const [result, setResult] = useState<CodexInspectionRunResult | null>(null);
-  const [executing, setExecuting] = useState(false);
-  const [historyEntries, setHistoryEntries] = useState<InspectionHistoryEntry[]>(loadInspectionHistoryEntries);
-  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
-  const logCounterRef = useRef(0);
-  const sessionRef = useRef<CodexInspectionSession | null>(null);
-  const activeSessionIdRef = useRef<string | null>(null);
+  const logs = useCodexInspectionStore((state) => state.logs);
+  const setLogs = useCodexInspectionStore((state) => state.setLogs);
+  const logsCollapsed = useCodexInspectionStore((state) => state.logsCollapsed);
+  const setLogsCollapsed = useCodexInspectionStore((state) => state.setLogsCollapsed);
+  const runStatus = useCodexInspectionStore((state) => state.runStatus);
+  const setRunStatus = useCodexInspectionStore((state) => state.setRunStatus);
+  const progress = useCodexInspectionStore((state) => state.progress);
+  const setProgress = useCodexInspectionStore((state) => state.setProgress);
+  const result = useCodexInspectionStore((state) => state.result);
+  const setResult = useCodexInspectionStore((state) => state.setResult);
+  const executing = useCodexInspectionStore((state) => state.executing);
+  const setExecuting = useCodexInspectionStore((state) => state.setExecuting);
+  const historyEntries = useCodexInspectionStore((state) => state.historyEntries);
+  const setHistoryEntries = useCodexInspectionStore((state) => state.setHistoryEntries);
+  const runStartedAt = useCodexInspectionStore((state) => state.runStartedAt);
+  const setRunStartedAt = useCodexInspectionStore((state) => state.setRunStartedAt);
   const logListRef = useRef<HTMLDivElement | null>(null);
   const executeItemsRef = useRef<
     ((
       items: CodexInspectionResultItem[],
-      options?: { resultOverride?: CodexInspectionRunResult | null; source?: ExecutionTriggerSource }
+      options?: { resultOverride?: CodexInspectionRunResult | null; source?: CodexInspectionExecutionTriggerSource }
     ) => Promise<void>) | null
   >(null);
+
+  useEffect(() => {
+    setHistoryEntries((previous) => (previous.length > 0 ? previous : loadInspectionHistoryEntries()));
+  }, [setHistoryEntries]);
 
   useEffect(() => {
     const nextSettings = loadCodexInspectionConfigurableSettings(config);
@@ -355,11 +331,11 @@ export function CodexInspectionPage() {
   }, [config, isSettingsModalOpen]);
 
   const appendLog = useCallback((level: CodexInspectionLogLevel, message: string) => {
-    logCounterRef.current += 1;
+    codexInspectionLogCounter += 1;
     setLogs((previous) => [
       ...previous,
       {
-        id: `${Date.now()}-${logCounterRef.current}`,
+        id: `${Date.now()}-${codexInspectionLogCounter}`,
         level,
         message,
         timestamp: Date.now(),
@@ -367,7 +343,7 @@ export function CodexInspectionPage() {
     ]);
   }, []);
 
-  const prependHistoryEntries = useCallback((entries: InspectionHistoryEntry[]) => {
+  const prependHistoryEntries = useCallback((entries: CodexInspectionHistoryEntry[]) => {
     if (entries.length === 0) return;
     setHistoryEntries((previous) => {
       const next = mergeHistoryEntries(previous, entries);
@@ -416,21 +392,13 @@ export function CodexInspectionPage() {
     element.scrollTop = element.scrollHeight;
   }, [logs, logsCollapsed]);
 
-  useEffect(() => {
-    return () => {
-      activeSessionIdRef.current = null;
-      sessionRef.current?.stop();
-      sessionRef.current = null;
-    };
-  }, []);
-
   const attachSessionPromise = useCallback(
     (session: CodexInspectionSession, promise: Promise<CodexInspectionRunResult>, autoExecuteOnComplete: boolean) => {
       const sessionId = session.id;
 
       void promise
         .then((nextResult) => {
-          if (activeSessionIdRef.current !== sessionId) return;
+          if (activeCodexInspectionSessionId !== sessionId) return;
           const nextAutoExecutableResults = nextResult.results.filter(isAutoExecutableAction);
           const nextIssueEntries = createIssueHistoryEntries(nextResult.results.filter(isSuggestedAction));
           setResult(nextResult);
@@ -462,11 +430,11 @@ export function CodexInspectionPage() {
           showNotification(t('monitoring.codex_inspection_run_success'), 'success');
         })
         .catch((error) => {
-          if (activeSessionIdRef.current !== sessionId) return;
+          if (activeCodexInspectionSessionId !== sessionId) return;
           if (isCodexInspectionStoppedError(error)) {
             setRunStatus('idle');
             setRunStartedAt(null);
-            setProgress(createIdleProgressSnapshot());
+            setProgress(createIdleCodexInspectionProgress());
             return;
           }
 
@@ -516,11 +484,11 @@ export function CodexInspectionPage() {
         managementKey,
         settings: inspectionSettings,
         onLog: (level, message) => {
-          if (activeSessionIdRef.current !== session.id) return;
+          if (activeCodexInspectionSessionId !== session.id) return;
           appendLog(level, message);
         },
         onProgress: (snapshot) => {
-          if (activeSessionIdRef.current !== session.id) return;
+          if (activeCodexInspectionSessionId !== session.id) return;
           setProgress(snapshot);
           if (snapshot.status === 'running') {
             setRunStatus('running');
@@ -532,8 +500,8 @@ export function CodexInspectionPage() {
         },
       });
 
-      sessionRef.current = session;
-      activeSessionIdRef.current = session.id;
+      codexInspectionSession = session;
+      activeCodexInspectionSessionId = session.id;
       setProgress(session.getProgress());
       attachSessionPromise(session, session.start(), autoExecuteOnComplete);
     },
@@ -551,9 +519,9 @@ export function CodexInspectionPage() {
   );
 
   const handleRunInspection = useCallback(() => {
-    if (runStatus === 'paused' && sessionRef.current) {
+    if (runStatus === 'paused' && codexInspectionSession) {
       setLogsCollapsed(false);
-      sessionRef.current.resume();
+      codexInspectionSession.resume();
       return;
     }
 
@@ -562,20 +530,20 @@ export function CodexInspectionPage() {
 
   const handlePauseInspection = useCallback(() => {
     if (runStatus !== 'running') return;
-    sessionRef.current?.pause();
+    codexInspectionSession?.pause();
   }, [runStatus]);
 
   const handleStopInspection = useCallback(() => {
-    const currentSession = sessionRef.current;
+    const currentSession = codexInspectionSession;
     if (!currentSession) return;
 
     appendLog('warning', t('monitoring.codex_inspection_stopped'));
-    activeSessionIdRef.current = null;
-    sessionRef.current = null;
+    activeCodexInspectionSessionId = null;
+    codexInspectionSession = null;
     currentSession.stop();
     setRunStatus('idle');
     setRunStartedAt(null);
-    setProgress(createIdleProgressSnapshot());
+    setProgress(createIdleCodexInspectionProgress());
     setResult(null);
     setLogsCollapsed(false);
   }, [appendLog, t]);
@@ -585,7 +553,7 @@ export function CodexInspectionPage() {
       items: CodexInspectionResultItem[],
       options?: {
         resultOverride?: CodexInspectionRunResult | null;
-        source?: ExecutionTriggerSource;
+        source?: CodexInspectionExecutionTriggerSource;
       }
     ) => {
       const currentResult = options?.resultOverride ?? result;
@@ -794,7 +762,7 @@ export function CodexInspectionPage() {
   }, [inspectionSettings.delaySeconds, inspectionSettings.workers, progress.completed, progress.total, runStartedAt, runStatus, t]);
 
   const formatHistoryTitle = useCallback(
-    (entry: InspectionHistoryEntry) => {
+    (entry: CodexInspectionHistoryEntry) => {
       if (entry.kind === 'issue') {
         return t('monitoring.codex_inspection_history_issue_title', {
           action: formatActionLabel(entry.action, t),
@@ -808,7 +776,7 @@ export function CodexInspectionPage() {
   );
 
   const formatHistoryResult = useCallback(
-    (entry: InspectionHistoryEntry) => {
+    (entry: CodexInspectionHistoryEntry) => {
       if (entry.kind === 'issue') {
         return entry.action === 'delete'
           ? t('monitoring.codex_inspection_history_issue_delete_pending')
@@ -1366,3 +1334,5 @@ export function CodexInspectionPage() {
     </div>
   );
 }
+
+

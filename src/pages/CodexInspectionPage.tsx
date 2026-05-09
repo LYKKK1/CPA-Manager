@@ -102,9 +102,6 @@ const formatTimestamp = (value: number, locale: string) => new Date(value).toLoc
 
 const formatPercent = (value: number | null) => (value === null ? '--' : `${value.toFixed(1)}%`);
 
-const formatUsd = (value: number | null | undefined) =>
-  value === null || value === undefined || !Number.isFinite(value) ? '--' : `$${value.toFixed(2)}`;
-
 const toSettingsDraft = (settings: CodexInspectionConfigurableSettings): InspectionSettingsDraft => ({
   targetType: settings.targetType,
   workers: String(settings.workers),
@@ -724,12 +721,6 @@ export function CodexInspectionPage() {
       ];
     }
 
-    const inspectedResults = result?.results ?? [];
-    const weeklyRemainingUsd = inspectedResults.reduce(
-      (total, item) => total + (item.weeklyRemainingUsd ?? 0),
-      0
-    );
-
     return [
       {
         key: 'total',
@@ -758,12 +749,6 @@ export function CodexInspectionPage() {
         label: t('monitoring.codex_inspection_enable_count'),
         value: String(summarySource.enableCount),
         tone: summarySource.enableCount > 0 ? 'good' : 'neutral',
-      },
-      {
-        key: 'weeklyRemainingUsd',
-        label: t('monitoring.codex_inspection_weekly_remaining_usd_total'),
-        value: result ? formatUsd(weeklyRemainingUsd) : '--',
-        tone: weeklyRemainingUsd > 0 ? 'good' : 'neutral',
       },
     ];
   }, [progress.summary, result, runStatus, t]);
@@ -1180,7 +1165,6 @@ export function CodexInspectionPage() {
                   <col className={styles.stateColumn} />
                   <col className={styles.httpColumn} />
                   <col className={styles.usageColumn} />
-                  <col className={styles.usdColumn} />
                   <col className={styles.actionColumn} />
                   <col className={styles.reasonColumn} />
                   <col className={styles.errorColumn} />
@@ -1192,7 +1176,6 @@ export function CodexInspectionPage() {
                     <th>{t('monitoring.codex_inspection_current_state')}</th>
                     <th>{t('monitoring.codex_inspection_http_status')}</th>
                     <th>{t('monitoring.codex_inspection_used_percent')}</th>
-                    <th>{t('monitoring.codex_inspection_weekly_usd')}</th>
                     <th>{t('monitoring.codex_inspection_next_action')}</th>
                     <th>{t('monitoring.codex_inspection_reason')}</th>
                     <th>{t('monitoring.codex_inspection_error')}</th>
@@ -1212,12 +1195,6 @@ export function CodexInspectionPage() {
                       <td>{formatCurrentStateLabel(item, t)}</td>
                       <td>{item.statusCode === null ? '--' : item.statusCode}</td>
                       <td>{formatPercent(item.usedPercent)}</td>
-                      <td>
-                        <div className={styles.primaryCell}>
-                          <span>{formatUsd(item.weeklyRemainingUsd)}</span>
-                          <small>{`${t('monitoring.codex_inspection_weekly_used_usd')}: ${formatUsd(item.weeklyUsedUsd)}`}</small>
-                        </div>
-                      </td>
                       <td>
                         <span className={`${styles.actionBadge} ${actionToneClass[item.action]}`}>
                           {formatActionLabel(item.action, t)}
@@ -1239,7 +1216,7 @@ export function CodexInspectionPage() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={9}>
+                      <td colSpan={8}>
                         <div className={styles.emptyBlockSmall}>{t('monitoring.codex_inspection_no_pending_actions')}</div>
                       </td>
                     </tr>

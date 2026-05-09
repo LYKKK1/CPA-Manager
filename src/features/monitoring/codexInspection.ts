@@ -63,10 +63,6 @@ export interface CodexInspectionResultItem extends CodexInspectionAccount {
   actionReason: string;
   statusCode: number | null;
   usedPercent: number | null;
-  weeklyUsedCredits: number | null;
-  weeklyUsedUsd: number | null;
-  weeklyLimitUsd: number | null;
-  weeklyRemainingUsd: number | null;
   isQuota: boolean;
   error: string;
 }
@@ -490,49 +486,6 @@ const isRateLimitReached = (rateLimit?: CodexRateLimitInfo | null) => {
   });
 };
 
-const creditsToUsd = (credits: number | null) => (credits === null ? null : (credits / 1000) * 40);
-
-const getWindowCredits = (window?: CodexUsageWindow | null): number | null => {
-  if (!window) return null;
-  const record = window as Record<string, unknown>;
-  const candidates = [
-    'credits',
-    'credit',
-    'used_credits',
-    'usedCredits',
-    'credits_used',
-    'creditsUsed',
-    'total_credits',
-    'totalCredits',
-  ];
-  for (const key of candidates) {
-    const value = normalizeNumberValue(record[key]);
-    if (value !== null) return value;
-  }
-  return null;
-};
-
-const buildWeeklyDollarEstimate = (usedCredits: number | null, usedPercent: number | null) => {
-  const usedUsd = creditsToUsd(usedCredits);
-  if (usedUsd === null || usedPercent === null || usedPercent <= 0) {
-    return {
-      weeklyUsedCredits: usedCredits,
-      weeklyUsedUsd: usedUsd,
-      weeklyLimitUsd: null,
-      weeklyRemainingUsd: null,
-    };
-  }
-  const limitUsd = usedUsd / (usedPercent / 100);
-  return {
-    weeklyUsedCredits: usedCredits,
-    weeklyUsedUsd: usedUsd,
-    weeklyLimitUsd: limitUsd,
-    weeklyRemainingUsd: Math.max(0, limitUsd - usedUsd),
-  };
-};
-
-const emptyWeeklyDollarEstimate = buildWeeklyDollarEstimate(null, null);
-
 type CodexInspectionDecision = Pick<
   CodexInspectionResultItem,
   'action' | 'actionReason' | 'usedPercent' | 'isQuota'
@@ -682,7 +635,6 @@ const inspectSingleAccount = async (
       actionReason: '缺少 auth_index，保留账号',
       statusCode: null,
       usedPercent: null,
-      ...emptyWeeklyDollarEstimate,
       isQuota: false,
       error: '缺少 auth_index',
     };
@@ -716,7 +668,6 @@ const inspectSingleAccount = async (
         actionReason: '探测响应缺少 status_code，保留账号',
         statusCode: null,
         usedPercent: null,
-        ...emptyWeeklyDollarEstimate,
         isQuota: false,
         error: '响应缺少 status_code',
       };
@@ -724,7 +675,6 @@ const inspectSingleAccount = async (
 
     const payload = parseCodexUsagePayload(result.body ?? result.bodyText);
     const rateLimit = payload?.rate_limit ?? payload?.rateLimit ?? null;
-    const { weeklyWindow } = pickClassifiedWindows(rateLimit);
     const usedPercent = deriveUsedPercent(rateLimit);
     const bodyText = result.bodyText.toLowerCase();
     const isQuota =
@@ -750,13 +700,9 @@ const inspectSingleAccount = async (
             ? 'success'
             : 'info';
     const percentText = decision.usedPercent === null ? '--' : `${decision.usedPercent.toFixed(1)}%`;
-    const weeklyUsedCredits = getWindowCredits(weeklyWindow);
-    const weeklyDollarEstimate = buildWeeklyDollarEstimate(weeklyUsedCredits, decision.usedPercent);
-    const remainingText =
-      weeklyDollarEstimate.weeklyRemainingUsd === null ? '--' : `$${weeklyDollarEstimate.weeklyRemainingUsd.toFixed(2)}`;
     onLog?.(
       successLevel,
-      `${account.displayAccount} -> ${decision.action} (HTTP ${result.statusCode} · 已用 ${percentText} · 周剩余 ${remainingText})`
+      `${account.displayAccount} -> ${decision.action} (HTTP ${result.statusCode} · 已用 ${percentText})`
     );
 
     return {
@@ -765,7 +711,6 @@ const inspectSingleAccount = async (
       actionReason: decision.actionReason,
       statusCode: result.statusCode,
       usedPercent: decision.usedPercent,
-      ...weeklyDollarEstimate,
       isQuota: decision.isQuota,
       error: '',
     };
@@ -778,7 +723,6 @@ const inspectSingleAccount = async (
       actionReason: '探测异常，保留账号',
       statusCode: null,
       usedPercent: null,
-      ...emptyWeeklyDollarEstimate,
       isQuota: false,
       error: errorMessage,
     };
@@ -1021,7 +965,6 @@ export const createCodexInspectionSession = ({
             actionReason: '探测异常，保留账号',
             statusCode: null,
             usedPercent: null,
-            ...emptyWeeklyDollarEstimate,
             isQuota: false,
             error: error instanceof Error ? error.message : String(error || '探测失败'),
           });

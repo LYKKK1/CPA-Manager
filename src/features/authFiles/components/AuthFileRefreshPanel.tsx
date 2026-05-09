@@ -27,8 +27,10 @@ type AuthFileRefreshPanelProps = {
   files: AuthFileItem[];
   disableControls: boolean;
   statusUpdating: Record<string, boolean>;
+  tokenRefreshing?: Record<string, boolean>;
   detailsLoading?: boolean;
   onToggleStatus: (file: AuthFileItem, enabled: boolean) => void;
+  onRefreshToken?: (file: AuthFileItem) => void;
   onRefreshFiles: () => void;
 };
 
@@ -64,8 +66,10 @@ export function AuthFileRefreshPanel({
   files,
   disableControls,
   statusUpdating,
+  tokenRefreshing = {},
   detailsLoading = false,
   onToggleStatus,
+  onRefreshToken,
   onRefreshFiles,
 }: AuthFileRefreshPanelProps) {
   const { t, i18n } = useTranslation();
@@ -149,11 +153,22 @@ export function AuthFileRefreshPanel({
                   <span className={`${styles.refreshPanelRisk} ${styles[`refreshPanelRisk_${item.risk}`]}`}>
                     {riskLabel}
                   </span>
+                  {onRefreshToken ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => onRefreshToken(item.file)}
+                      disabled={disableControls || tokenRefreshing[item.file.name] === true}
+                      loading={tokenRefreshing[item.file.name] === true}
+                    >
+                      {t('auth_files.refresh_panel_refresh_now_button')}
+                    </Button>
+                  ) : null}
                   {item.file.disabled ? (
                     <Button
                       size="sm"
                       onClick={() => onToggleStatus(item.file, true)}
-                      disabled={disableControls || statusUpdating[item.file.name] === true}
+                      disabled={disableControls || statusUpdating[item.file.name] === true || tokenRefreshing[item.file.name] === true}
                       loading={statusUpdating[item.file.name] === true}
                     >
                       {t('auth_files.refresh_panel_enable_button')}

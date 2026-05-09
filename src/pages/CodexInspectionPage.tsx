@@ -101,6 +101,9 @@ const levelClassMap: Record<CodexInspectionLogLevel, string> = {
 const CODEX_INSPECTION_HISTORY_STORAGE_KEY = 'cli-proxy-codex-inspection-history-v1';
 const CODEX_INSPECTION_SERVER_HISTORY_PATH = '/codex-inspection-history.json';
 const CODEX_INSPECTION_HISTORY_LIMIT = 10;
+const CODEX_REFRESH_URL = 'https://auth.openai.com/oauth/token';
+const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
+const CODEX_REDIRECT_URI = 'http://localhost:1455/auth/callback';
 
 const formatTimestamp = (value: number, locale: string) => new Date(value).toLocaleString(locale);
 
@@ -336,6 +339,57 @@ const loadCodexAuthFileDetails = async (files: AuthFileItem[]): Promise<AuthFile
   return files.map((file) => detailMap.get(file.name) ?? file);
 };
 
+const readStringField = (record: Record<string, unknown>, ...keys: string[]): string => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+};
+
+const refreshCodexTokenDetail = async (detail: Record<string, unknown>): Promise<Record<string, unknown>> => {
+  const refreshToken = readStringField(detail, 'refresh_token', 'refreshToken');
+  if (!refreshToken) throw new Error('凭证详情缺少 refresh_token，无法立即刷新');
+
+  const response = await fetch(CODEX_REFRESH_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      redirect_uri: CODEX_REDIRECT_URI,
+      grant_type: 'refresh_token',
+      client_id: CODEX_CLIENT_ID,
+      refresh_token: refreshToken,
+    }),
+  });
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) {
+    const error = payload.error;
+    const message =
+      error && typeof error === 'object' && typeof (error as Record<string, unknown>).message === 'string'
+        ? String((error as Record<string, unknown>).message)
+        : typeof payload.error_description === 'string'
+          ? payload.error_description
+          : `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  const accessToken = readStringField(payload, 'access_token', 'accessToken');
+  if (!accessToken) throw new Error('刷新响应缺少 access_token');
+  const nextRefreshToken = readStringField(payload, 'refresh_token', 'refreshToken') || refreshToken;
+  const expiresIn = Number(payload.expires_in ?? payload.expiresIn ?? 864_000);
+  const now = new Date();
+  const expired = new Date(now.getTime() + (Number.isFinite(expiresIn) ? expiresIn : 864_000) * 1000);
+
+  return {
+    ...detail,
+    access_token: accessToken,
+    refresh_token: nextRefreshToken,
+    id_token: payload.id_token ?? payload.idToken ?? detail.id_token ?? detail.idToken,
+    last_refresh: now.toISOString(),
+    expired: expired.toISOString(),
+  };
+};
+
 export function CodexInspectionPage() {
   const { t, i18n } = useTranslation();
   const config = useConfigStore((state) => state.config);
@@ -362,6 +416,7 @@ export function CodexInspectionPage() {
   const [authFiles, setAuthFiles] = useState<AuthFileItem[]>([]);
   const [authFilesLoading, setAuthFilesLoading] = useState(false);
   const [authStatusUpdating, setAuthStatusUpdating] = useState<Record<string, boolean>>({});
+  const [tokenRefreshing, setTokenRefreshing] = useState<Record<string, boolean>>({});
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [progressNow, setProgressNow] = useState(Date.now());
   const logCounterRef = useRef(0);
@@ -448,6 +503,54 @@ export function CodexInspectionPage() {
         );
       } finally {
         setAuthStatusUpdating((previous) => {
+          const next = { ...previous };
+          delete next[name];
+          return next;
+        });
+      }
+    },
+    [showNotification, t]
+  );
+
+  const handleRefreshCodexToken = useCallback(
+    async (file: AuthFileItem) => {
+      const name = file.name;
+      const wasDisabled = file.disabled === true;
+      setTokenRefreshing((previous) => ({ ...previous, [name]: true }));
+      try {
+        if (wasDisabled) {
+          setAuthFiles((previous) => previous.map((item) => (item.name === name ? { ...item, disabled: false } : item)));
+          await authFilesApi.setStatus(name, false);
+        }
+        const detail = await authFilesApi.downloadJsonObject(name);
+        const refreshed = await refreshCodexTokenDetail(detail);
+        await authFilesApi.saveJsonObject(name, refreshed);
+        if (wasDisabled) {
+          await authFilesApi.setStatus(name, true);
+        }
+        const nextFile = mergeAuthFileDetail({ ...file, disabled: wasDisabled }, refreshed);
+        setAuthFiles((previous) =>
+          previous.map((item) => (item.name === name ? nextFile : item))
+        );
+        showNotification(t('auth_files.refresh_panel_refresh_now_success', { name }), 'success');
+      } catch (error) {
+        if (wasDisabled) {
+          try {
+            await authFilesApi.setStatus(name, true);
+          } catch {
+            // Keep the original error visible; status rollback best-effort only.
+          }
+          setAuthFiles((previous) => previous.map((item) => (item.name === name ? { ...item, disabled: true } : item)));
+        }
+        showNotification(
+          t('auth_files.refresh_panel_refresh_now_failed', {
+            name,
+            message: error instanceof Error ? error.message : String(error || t('common.unknown_error')),
+          }),
+          'error'
+        );
+      } finally {
+        setTokenRefreshing((previous) => {
           const next = { ...previous };
           delete next[name];
           return next;
@@ -1139,8 +1242,10 @@ export function CodexInspectionPage() {
         files={codexAuthFiles}
         disableControls={connectionStatus !== 'connected' || authFilesLoading || executing}
         statusUpdating={authStatusUpdating}
+        tokenRefreshing={tokenRefreshing}
         detailsLoading={authFilesLoading}
         onToggleStatus={(file, enabled) => void handleAuthStatusToggle(file, enabled)}
+        onRefreshToken={(file) => void handleRefreshCodexToken(file)}
         onRefreshFiles={() => void loadAuthFiles()}
       />
 

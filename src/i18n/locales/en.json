@@ -627,7 +627,7 @@
     "usage_limit_auto_disabled": "Detected {{count}} credentials at usage limit and disabled them automatically",
     "usage_limit_auto_disable_failed": "Detected {{count}} usage-limited credentials, but automatic disable failed",
     "refresh_panel_title": "Token Refresh Countdown",
-    "refresh_panel_desc": "Disabled credentials are not included in the CLIProxyAPI auto-refresh queue. Enable them before expiry, wait for background refresh, then disable again if needed.",
+    "refresh_panel_desc": "Refresh Codex tokens immediately. Disabled credentials are enabled temporarily for refresh, then restored to disabled after completion.",
     "refresh_panel_detail_hint": "Now shown with account inspection: the panel loads Codex auth files, then tries to download credential details for expired/last_refresh. If those fields are missing, it decodes access_token exp for expiry. -- means the server did not return the field or the credential is not a parseable Codex OAuth JSON file.",
     "refresh_panel_total": "{{count}} credentials monitored",
     "refresh_panel_disabled": "{{count}} disabled",
@@ -639,6 +639,9 @@
     "refresh_panel_status_due": "Refresh suggested",
     "refresh_panel_status_disabled": "Disabled, no refresh",
     "refresh_panel_status_unknown": "Unknown expiry",
+    "refresh_panel_refresh_now_button": "Refresh now",
+    "refresh_panel_refresh_now_success": "Token refreshed for \"{{name}}\"",
+    "refresh_panel_refresh_now_failed": "Failed to refresh token for \"{{name}}\": {{message}}",
     "refresh_panel_enable_button": "Enable refresh",
     "refresh_panel_empty": "No token refresh reminders right now."
   },

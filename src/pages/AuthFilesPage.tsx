@@ -40,6 +40,7 @@ import {
   type ResolvedTheme,
 } from '@/features/authFiles/constants';
 import { AuthFileCard } from '@/features/authFiles/components/AuthFileCard';
+import { AuthFileRefreshPanel } from '@/features/authFiles/components/AuthFileRefreshPanel';
 import { AuthFileModelsModal } from '@/features/authFiles/components/AuthFileModelsModal';
 import { AuthFilesPrefixProxyEditorModal } from '@/features/authFiles/components/AuthFilesPrefixProxyEditorModal';
 import { OAuthExcludedCard } from '@/features/authFiles/components/OAuthExcludedCard';
@@ -714,6 +715,14 @@ export function AuthFilesPage() {
         }
       >
         {error && <div className={styles.errorBox}>{error}</div>}
+
+        <AuthFileRefreshPanel
+          files={files}
+          disableControls={disableControls}
+          statusUpdating={statusUpdating}
+          onToggleStatus={(file, enabled) => void handleStatusToggle(file, enabled)}
+          onRefreshFiles={() => void loadFiles()}
+        />
 
         <div className={styles.filterSection}>
           {renderFilterTags()}

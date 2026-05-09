@@ -35,6 +35,12 @@ export const QUOTA_PROVIDER_TYPES = new Set<QuotaProviderType>([
 export const MIN_CARD_PAGE_SIZE = 3;
 export const MAX_CARD_PAGE_SIZE = 30;
 export const AUTH_FILE_REFRESH_WARNING_MS = 24 * 60 * 60 * 1000;
+export const AUTH_FILE_REFRESH_LEAD_MS: Record<string, number> = {
+  codex: 5 * 24 * 60 * 60 * 1000,
+  claude: 4 * 60 * 60 * 1000,
+  antigravity: 5 * 60 * 1000,
+  kimi: 5 * 60 * 1000,
+};
 
 export const INTEGER_STRING_PATTERN = /^[+-]?\d+$/;
 export const TRUTHY_TEXT_VALUES = new Set(['true', '1', 'yes', 'y', 'on']);
@@ -139,6 +145,47 @@ export const getAuthFileStatusMessage = (file: AuthFileItem): string => {
 
 export const hasAuthFileStatusMessage = (file: AuthFileItem): boolean =>
   getAuthFileStatusMessage(file).length > 0;
+
+export const parseAuthFileTimestamp = (value: unknown): number | null => {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value < 1e12 ? value * 1000 : value;
+  }
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const asNumber = Number(trimmed);
+  if (Number.isFinite(asNumber)) return asNumber < 1e12 ? asNumber * 1000 : asNumber;
+  const parsed = parseTimestamp(trimmed) ?? new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+};
+
+export const getAuthFileExpiryMs = (file: AuthFileItem): number | null => {
+  const keys = ['expired', 'expire', 'expires_at', 'expiresAt', 'expiry', 'expires'];
+  for (const key of keys) {
+    const timestamp = parseAuthFileTimestamp(file[key]);
+    if (timestamp) return timestamp;
+  }
+  return null;
+};
+
+export const getAuthFileLastRefreshMs = (file: AuthFileItem): number | null => {
+  const keys = ['last_refresh', 'lastRefresh', 'last_refreshed_at', 'lastRefreshedAt'];
+  for (const key of keys) {
+    const timestamp = parseAuthFileTimestamp(file[key]);
+    if (timestamp) return timestamp;
+  }
+  return null;
+};
+
+export const getAuthFileNextRefreshAfterMs = (file: AuthFileItem): number | null => {
+  const keys = ['next_refresh_after', 'nextRefreshAfter'];
+  for (const key of keys) {
+    const timestamp = parseAuthFileTimestamp(file[key]);
+    if (timestamp) return timestamp;
+  }
+  return null;
+};
 
 export const isUsageLimitReachedAuthFile = (file: AuthFileItem): boolean => {
   const rawMessage = getAuthFileStatusMessage(file);

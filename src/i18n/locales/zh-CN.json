@@ -625,7 +625,21 @@
     "quota_refresh_success": "已刷新 \"{{name}}\" 的额度",
     "quota_refresh_failed": "刷新 \"{{name}}\" 的额度失败：{{message}}",
     "usage_limit_auto_disabled": "检测到 {{count}} 个凭证达到用量上限，已自动停用",
-    "usage_limit_auto_disable_failed": "检测到 {{count}} 个用量上限凭证，但自动停用失败"
+    "usage_limit_auto_disable_failed": "检测到 {{count}} 个用量上限凭证，但自动停用失败",
+    "refresh_panel_title": "Token 刷新倒计时",
+    "refresh_panel_desc": "停用凭证不会进入 CLIProxyAPI 自动刷新队列；请在到期前启用一次，等待后台刷新完成后再按需停用。",
+    "refresh_panel_total": "可监控 {{count}} 个凭证",
+    "refresh_panel_disabled": "停用 {{count}} 个",
+    "refresh_panel_due": "即将到期 {{count}} 个",
+    "refresh_panel_unknown": "未知到期 {{count}} 个",
+    "refresh_panel_expiry": "到期：{{time}}（{{remaining}}）",
+    "refresh_panel_last_refresh": "最近刷新：{{time}}",
+    "refresh_panel_status_expired": "已过期",
+    "refresh_panel_status_due": "建议刷新",
+    "refresh_panel_status_disabled": "停用不刷新",
+    "refresh_panel_status_unknown": "未知到期",
+    "refresh_panel_enable_button": "启用刷新",
+    "refresh_panel_empty": "当前没有需要提醒的 Token 刷新项。"
   },
   "antigravity_quota": {
     "title": "Antigravity 额度",

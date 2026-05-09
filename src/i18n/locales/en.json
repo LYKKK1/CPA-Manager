@@ -625,7 +625,21 @@
     "quota_refresh_success": "Quota refreshed for \"{{name}}\"",
     "quota_refresh_failed": "Failed to refresh quota for \"{{name}}\": {{message}}",
     "usage_limit_auto_disabled": "Detected {{count}} credentials at usage limit and disabled them automatically",
-    "usage_limit_auto_disable_failed": "Detected {{count}} usage-limited credentials, but automatic disable failed"
+    "usage_limit_auto_disable_failed": "Detected {{count}} usage-limited credentials, but automatic disable failed",
+    "refresh_panel_title": "Token Refresh Countdown",
+    "refresh_panel_desc": "Disabled credentials are not included in the CLIProxyAPI auto-refresh queue. Enable them before expiry, wait for background refresh, then disable again if needed.",
+    "refresh_panel_total": "{{count}} credentials monitored",
+    "refresh_panel_disabled": "{{count}} disabled",
+    "refresh_panel_due": "{{count}} due soon",
+    "refresh_panel_unknown": "{{count}} unknown expiry",
+    "refresh_panel_expiry": "Expires: {{time}} ({{remaining}})",
+    "refresh_panel_last_refresh": "Last refresh: {{time}}",
+    "refresh_panel_status_expired": "Expired",
+    "refresh_panel_status_due": "Refresh suggested",
+    "refresh_panel_status_disabled": "Disabled, no refresh",
+    "refresh_panel_status_unknown": "Unknown expiry",
+    "refresh_panel_enable_button": "Enable refresh",
+    "refresh_panel_empty": "No token refresh reminders right now."
   },
   "antigravity_quota": {
     "title": "Antigravity Quota",

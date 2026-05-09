@@ -616,7 +616,21 @@
     "quota_refresh_success": "Квота для \"{{name}}\" обновлена",
     "quota_refresh_failed": "Не удалось обновить квоту для \"{{name}}\": {{message}}",
     "usage_limit_auto_disabled": "Обнаружено {{count}} учётных данных с достигнутым лимитом, они автоматически отключены",
-    "usage_limit_auto_disable_failed": "Обнаружено {{count}} учётных данных с лимитом, но автоматическое отключение не удалось"
+    "usage_limit_auto_disable_failed": "Обнаружено {{count}} учётных данных с лимитом, но автоматическое отключение не удалось",
+    "refresh_panel_title": "Обратный отсчёт обновления Token",
+    "refresh_panel_desc": "Отключённые учётные данные не входят в очередь автообновления CLIProxyAPI. Включите их перед истечением, дождитесь фонового обновления и при необходимости снова отключите.",
+    "refresh_panel_total": "Отслеживается {{count}} учётных данных",
+    "refresh_panel_disabled": "Отключено {{count}}",
+    "refresh_panel_due": "Скоро истекает {{count}}",
+    "refresh_panel_unknown": "Неизвестный срок {{count}}",
+    "refresh_panel_expiry": "Истекает: {{time}} ({{remaining}})",
+    "refresh_panel_last_refresh": "Последнее обновление: {{time}}",
+    "refresh_panel_status_expired": "Истекло",
+    "refresh_panel_status_due": "Рекомендуется обновить",
+    "refresh_panel_status_disabled": "Отключено, не обновляется",
+    "refresh_panel_status_unknown": "Срок неизвестен",
+    "refresh_panel_enable_button": "Включить обновление",
+    "refresh_panel_empty": "Сейчас нет напоминаний об обновлении Token."
   },
   "antigravity_quota": {
     "title": "Квота Antigravity",

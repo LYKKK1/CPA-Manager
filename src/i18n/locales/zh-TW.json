@@ -619,7 +619,21 @@
     "quota_refresh_success": "已重新整理「{{name}}」的配額",
     "quota_refresh_failed": "重新整理「{{name}}」的配額失敗：{{message}}",
     "usage_limit_auto_disabled": "偵測到 {{count}} 個憑證達到用量上限，已自動停用",
-    "usage_limit_auto_disable_failed": "偵測到 {{count}} 個用量上限憑證，但自動停用失敗"
+    "usage_limit_auto_disable_failed": "偵測到 {{count}} 個用量上限憑證，但自動停用失敗",
+    "refresh_panel_title": "Token 重新整理倒數",
+    "refresh_panel_desc": "停用憑證不會進入 CLIProxyAPI 自動重新整理佇列；請在到期前啟用一次，等待背景重新整理完成後再按需停用。",
+    "refresh_panel_total": "可監控 {{count}} 個憑證",
+    "refresh_panel_disabled": "停用 {{count}} 個",
+    "refresh_panel_due": "即將到期 {{count}} 個",
+    "refresh_panel_unknown": "未知到期 {{count}} 個",
+    "refresh_panel_expiry": "到期：{{time}}（{{remaining}}）",
+    "refresh_panel_last_refresh": "最近重新整理：{{time}}",
+    "refresh_panel_status_expired": "已過期",
+    "refresh_panel_status_due": "建議重新整理",
+    "refresh_panel_status_disabled": "停用不重新整理",
+    "refresh_panel_status_unknown": "未知到期",
+    "refresh_panel_enable_button": "啟用重新整理",
+    "refresh_panel_empty": "目前沒有需要提醒的 Token 重新整理項。"
   },
   "antigravity_quota": {
     "title": "Antigravity 配額",

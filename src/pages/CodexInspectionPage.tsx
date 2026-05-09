@@ -30,7 +30,11 @@ import {
   type CodexInspectionRunResult,
   type CodexInspectionSession,
 } from '@/features/monitoring/codexInspection';
+import { AuthFileRefreshPanel } from '@/features/authFiles/components/AuthFileRefreshPanel';
+import { isRuntimeOnlyAuthFile, normalizeProviderKey } from '@/features/authFiles/constants';
+import { authFilesApi } from '@/services/api';
 import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
+import type { AuthFileItem } from '@/types';
 import styles from './CodexInspectionPage.module.scss';
 
 type RunStatus = 'idle' | 'running' | 'paused' | 'success' | 'error';
@@ -302,6 +306,36 @@ const formatEtaDuration = (milliseconds: number) => {
   return `${seconds}秒`;
 };
 
+const isCodexAuthFile = (file: AuthFileItem): boolean => {
+  const provider = normalizeProviderKey(String(file.provider ?? file.type ?? ''));
+  return provider === 'codex' || file.name.toLowerCase().includes('codex');
+};
+
+const mergeAuthFileDetail = (file: AuthFileItem, detail: Record<string, unknown>): AuthFileItem => ({
+  ...file,
+  ...detail,
+  name: file.name,
+  type: file.type ?? (detail.type as AuthFileItem['type']),
+  provider: file.provider ?? (detail.provider as string | undefined),
+  disabled: file.disabled,
+});
+
+const loadCodexAuthFileDetails = async (files: AuthFileItem[]): Promise<AuthFileItem[]> => {
+  const codexFiles = files.filter((file) => isCodexAuthFile(file) && !isRuntimeOnlyAuthFile(file));
+  const detailPairs = await Promise.all(
+    codexFiles.map(async (file) => {
+      try {
+        const detail = await authFilesApi.downloadJsonObject(file.name);
+        return [file.name, mergeAuthFileDetail(file, detail)] as const;
+      } catch {
+        return [file.name, file] as const;
+      }
+    })
+  );
+  const detailMap = new Map(detailPairs);
+  return files.map((file) => detailMap.get(file.name) ?? file);
+};
+
 export function CodexInspectionPage() {
   const { t, i18n } = useTranslation();
   const config = useConfigStore((state) => state.config);
@@ -325,6 +359,9 @@ export function CodexInspectionPage() {
   const [result, setResult] = useState<CodexInspectionRunResult | null>(null);
   const [executing, setExecuting] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<InspectionHistoryEntry[]>(loadInspectionHistoryEntries);
+  const [authFiles, setAuthFiles] = useState<AuthFileItem[]>([]);
+  const [authFilesLoading, setAuthFilesLoading] = useState(false);
+  const [authStatusUpdating, setAuthStatusUpdating] = useState<Record<string, boolean>>({});
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [progressNow, setProgressNow] = useState(Date.now());
   const logCounterRef = useRef(0);
@@ -367,6 +404,63 @@ export function CodexInspectionPage() {
       return next;
     });
   }, []);
+
+  const loadAuthFiles = useCallback(async () => {
+    setAuthFilesLoading(true);
+    try {
+      const response = await authFilesApi.list();
+      const files = Array.isArray(response.files) ? response.files : [];
+      const detailedFiles = await loadCodexAuthFileDetails(files);
+      setAuthFiles(detailedFiles);
+    } catch (error) {
+      showNotification(error instanceof Error ? error.message : String(error || t('notification.refresh_failed')), 'error');
+    } finally {
+      setAuthFilesLoading(false);
+    }
+  }, [showNotification, t]);
+
+  const handleAuthStatusToggle = useCallback(
+    async (file: AuthFileItem, enabled: boolean) => {
+      const name = file.name;
+      const nextDisabled = !enabled;
+      const previousDisabled = file.disabled === true;
+      setAuthStatusUpdating((previous) => ({ ...previous, [name]: true }));
+      setAuthFiles((previous) => previous.map((item) => (item.name === name ? { ...item, disabled: nextDisabled } : item)));
+
+      try {
+        const response = await authFilesApi.setStatus(name, nextDisabled);
+        setAuthFiles((previous) =>
+          previous.map((item) => (item.name === name ? { ...item, disabled: response.disabled } : item))
+        );
+        showNotification(
+          enabled
+            ? t('auth_files.status_enabled_success', { name })
+            : t('auth_files.status_disabled_success', { name }),
+          'success'
+        );
+      } catch (error) {
+        setAuthFiles((previous) =>
+          previous.map((item) => (item.name === name ? { ...item, disabled: previousDisabled } : item))
+        );
+        showNotification(
+          `${t('notification.update_failed')}: ${error instanceof Error ? error.message : String(error || '')}`,
+          'error'
+        );
+      } finally {
+        setAuthStatusUpdating((previous) => {
+          const next = { ...previous };
+          delete next[name];
+          return next;
+        });
+      }
+    },
+    [showNotification, t]
+  );
+
+  useEffect(() => {
+    if (connectionStatus !== 'connected') return;
+    void loadAuthFiles();
+  }, [connectionStatus, loadAuthFiles]);
 
   useEffect(() => {
     let cancelled = false;
@@ -764,6 +858,10 @@ export function CodexInspectionPage() {
 
   const pendingActionCount = actionableResults.length;
   const historyCount = historyEntries.length;
+  const codexAuthFiles = useMemo(
+    () => authFiles.filter((file) => isCodexAuthFile(file) && !isRuntimeOnlyAuthFile(file)),
+    [authFiles]
+  );
   const progressLabel =
     progress.total > 0
       ? t('monitoring.codex_inspection_progress_status', {
@@ -1036,6 +1134,15 @@ export function CodexInspectionPage() {
           </Card>
         ))}
       </section>
+
+      <AuthFileRefreshPanel
+        files={codexAuthFiles}
+        disableControls={connectionStatus !== 'connected' || authFilesLoading || executing}
+        statusUpdating={authStatusUpdating}
+        detailsLoading={authFilesLoading}
+        onToggleStatus={(file, enabled) => void handleAuthStatusToggle(file, enabled)}
+        onRefreshFiles={() => void loadAuthFiles()}
+      />
 
       <Card className={styles.panel}>
         <div className={styles.panelHeader}>

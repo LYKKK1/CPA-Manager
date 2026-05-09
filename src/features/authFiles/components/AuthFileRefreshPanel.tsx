@@ -27,6 +27,7 @@ type AuthFileRefreshPanelProps = {
   files: AuthFileItem[];
   disableControls: boolean;
   statusUpdating: Record<string, boolean>;
+  detailsLoading?: boolean;
   onToggleStatus: (file: AuthFileItem, enabled: boolean) => void;
   onRefreshFiles: () => void;
 };
@@ -63,6 +64,7 @@ export function AuthFileRefreshPanel({
   files,
   disableControls,
   statusUpdating,
+  detailsLoading = false,
   onToggleStatus,
   onRefreshFiles,
 }: AuthFileRefreshPanelProps) {
@@ -99,10 +101,12 @@ export function AuthFileRefreshPanel({
           <h3>{t('auth_files.refresh_panel_title')}</h3>
           <p>{t('auth_files.refresh_panel_desc')}</p>
         </div>
-        <Button variant="secondary" size="sm" onClick={onRefreshFiles} disabled={disableControls}>
+        <Button variant="secondary" size="sm" onClick={onRefreshFiles} disabled={disableControls} loading={detailsLoading}>
           {t('auth_files.refresh_files')}
         </Button>
       </div>
+
+      <div className={styles.refreshPanelHint}>{t('auth_files.refresh_panel_detail_hint')}</div>
 
       <div className={styles.refreshPanelStats}>
         <span>{t('auth_files.refresh_panel_total', { count: items.length })}</span>

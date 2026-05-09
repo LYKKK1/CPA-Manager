@@ -628,6 +628,7 @@
     "usage_limit_auto_disable_failed": "检测到 {{count}} 个用量上限凭证，但自动停用失败",
     "refresh_panel_title": "Token 刷新倒计时",
     "refresh_panel_desc": "停用凭证不会进入 CLIProxyAPI 自动刷新队列；请在到期前启用一次，等待后台刷新完成后再按需停用。",
+    "refresh_panel_detail_hint": "已合并到账号巡检：面板会先读取 Codex 认证文件列表，再尝试下载凭证详情读取 expired/last_refresh；如果详情里也没有这些字段，会解码 access_token 的 exp 显示到期时间。仍显示 -- 说明服务端没有返回对应字段或凭证不是可解析的 Codex OAuth JSON。",
     "refresh_panel_total": "可监控 {{count}} 个凭证",
     "refresh_panel_disabled": "停用 {{count}} 个",
     "refresh_panel_due": "即将到期 {{count}} 个",

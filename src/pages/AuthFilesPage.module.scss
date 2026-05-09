@@ -131,6 +131,13 @@
   }
 }
 
+.refreshPanelHint {
+  margin-top: 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .refreshPanelList {
   display: grid;
   gap: 10px;

@@ -160,12 +160,36 @@ export const parseAuthFileTimestamp = (value: unknown): number | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
 };
 
+const decodeJwtPayload = (token: unknown): Record<string, unknown> | null => {
+  if (typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length < 2 || !parts[1]) return null;
+  try {
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+    const binary = window.atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    const json = new TextDecoder().decode(bytes);
+    const payload = JSON.parse(json) as unknown;
+    return payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+};
+
+const getJwtExpMs = (token: unknown): number | null => {
+  const payload = decodeJwtPayload(token);
+  return payload ? parseAuthFileTimestamp(payload.exp) : null;
+};
+
 export const getAuthFileExpiryMs = (file: AuthFileItem): number | null => {
   const keys = ['expired', 'expire', 'expires_at', 'expiresAt', 'expiry', 'expires'];
   for (const key of keys) {
     const timestamp = parseAuthFileTimestamp(file[key]);
     if (timestamp) return timestamp;
   }
+  const accessTokenExpiry = getJwtExpMs(file['access_token'] ?? file.accessToken);
+  if (accessTokenExpiry) return accessTokenExpiry;
   return null;
 };
 

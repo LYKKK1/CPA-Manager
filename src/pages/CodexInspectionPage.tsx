@@ -301,6 +301,16 @@ const formatEtaDuration = (milliseconds: number) => {
   return `${roundedMinutes}分钟`;
 };
 
+const estimateInspectionDuration = (total: number, completed: number, workers: number, delaySeconds: number) => {
+  const remaining = Math.max(0, total - completed);
+  if (remaining <= 0) return { minimumMs: 0, expectedMs: 0 };
+  const concurrency = Math.max(1, workers || 1);
+  const waves = Math.ceil(remaining / concurrency);
+  const minimumMs = Math.max(0, waves - 1) * Math.max(0, delaySeconds) * 1000;
+  const expectedMs = minimumMs + waves * 2_000;
+  return { minimumMs, expectedMs };
+};
+
 export function CodexInspectionPage() {
   const { t, i18n } = useTranslation();
   const config = useConfigStore((state) => state.config);
@@ -771,22 +781,17 @@ export function CodexInspectionPage() {
       return '';
     }
     if (progress.completed >= progress.total) return '';
-    if (progress.completed <= 0) return t('monitoring.codex_inspection_progress_eta_calculating');
-
-    const now = Date.now();
-    const elapsed = Math.max(1, now - runStartedAt);
-    const average = elapsed / progress.completed;
-    const remaining = Math.max(0, progress.total - progress.completed) * average;
-    const eta = new Date(now + remaining).toLocaleTimeString(i18n.language, {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-
+    const estimate = estimateInspectionDuration(
+      progress.total,
+      progress.completed,
+      inspectionSettings.workers,
+      inspectionSettings.delaySeconds
+    );
     return t('monitoring.codex_inspection_progress_eta', {
-      time: eta,
-      remaining: formatEtaDuration(remaining),
+      minimum: formatEtaDuration(estimate.minimumMs),
+      expected: formatEtaDuration(estimate.expectedMs),
     });
-  }, [i18n.language, progress.completed, progress.total, runStartedAt, runStatus, t]);
+  }, [inspectionSettings.delaySeconds, inspectionSettings.workers, progress.completed, progress.total, runStartedAt, runStatus, t]);
 
   const formatHistoryTitle = useCallback(
     (entry: InspectionHistoryEntry) => {

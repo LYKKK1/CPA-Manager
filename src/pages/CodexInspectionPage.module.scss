@@ -460,7 +460,7 @@
 .table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 1060px;
+  min-width: 1180px;
   table-layout: fixed;
 }
 
@@ -484,12 +484,16 @@
   width: 9%;
 }
 
+.usdColumn {
+  width: 11%;
+}
+
 .actionColumn {
-  width: 9%;
+  width: 8%;
 }
 
 .reasonColumn {
-  width: 25%;
+  width: 23%;
 }
 
 .errorColumn {

@@ -63,6 +63,10 @@ export interface CodexInspectionResultItem extends CodexInspectionAccount {
   actionReason: string;
   statusCode: number | null;
   usedPercent: number | null;
+  weeklyUsedCredits: number | null;
+  weeklyUsedUsd: number | null;
+  weeklyLimitUsd: number | null;
+  weeklyRemainingUsd: number | null;
   isQuota: boolean;
   error: string;
 }
@@ -433,6 +437,20 @@ const getWindowUsedPercent = (window?: CodexUsageWindow | null) =>
 const getWindowSeconds = (window?: CodexUsageWindow | null) =>
   normalizeNumberValue(window?.limit_window_seconds ?? window?.limitWindowSeconds);
 
+const getWindowResetAfterSeconds = (window?: CodexUsageWindow | null) =>
+  normalizeNumberValue(window?.reset_after_seconds ?? window?.resetAfterSeconds);
+
+const getWindowResetAtMs = (window?: CodexUsageWindow | null) => {
+  const raw = window?.reset_at ?? window?.resetAt;
+  const numeric = normalizeNumberValue(raw);
+  if (numeric !== null) return numeric < 1e12 ? numeric * 1000 : numeric;
+  if (typeof raw === 'string') {
+    const parsed = Date.parse(raw);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
 const getLimitWindows = (rateLimit?: CodexRateLimitInfo | null) => [
   rateLimit?.primary_window ?? rateLimit?.primaryWindow ?? null,
   rateLimit?.secondary_window ?? rateLimit?.secondaryWindow ?? null,
@@ -485,6 +503,85 @@ const isRateLimitReached = (rateLimit?: CodexRateLimitInfo | null) => {
     return value !== null && value >= 100;
   });
 };
+
+const creditsToUsd = (credits: number | null) => (credits === null ? null : (credits / 1000) * 40);
+
+const getCurrentWeekRange = (weeklyWindow?: CodexUsageWindow | null) => {
+  const now = new Date();
+  const endFromResetAt = getWindowResetAtMs(weeklyWindow);
+  const resetAfterSeconds = getWindowResetAfterSeconds(weeklyWindow);
+  const endMs = endFromResetAt ?? now.getTime() + (resetAfterSeconds ?? WEEK_WINDOW_SECONDS) * 1000;
+  const startMs = endMs - WEEK_WINDOW_SECONDS * 1000;
+  const format = (value: number) => new Date(value).toISOString().slice(0, 10);
+  return { startDate: format(startMs), endDate: format(Math.min(endMs, now.getTime())) };
+};
+
+const sumNumericFields = (value: unknown, matcher: (key: string) => boolean): number => {
+  if (Array.isArray(value)) {
+    return value.reduce((total, item) => total + sumNumericFields(item, matcher), 0);
+  }
+  if (!value || typeof value !== 'object') return 0;
+  return Object.entries(value as Record<string, unknown>).reduce((total, [key, entry]) => {
+    const numeric = normalizeNumberValue(entry);
+    if (numeric !== null && matcher(key)) return total + numeric;
+    if (entry && typeof entry === 'object') return total + sumNumericFields(entry, matcher);
+    return total;
+  }, 0);
+};
+
+const extractAnalyticsCredits = (payload: unknown): number | null => {
+  const totalCredits = sumNumericFields(payload, (key) => {
+    const normalized = key.toLowerCase();
+    return normalized.includes('credit') && !normalized.includes('usd') && !normalized.includes('dollar');
+  });
+  return totalCredits > 0 ? totalCredits : null;
+};
+
+const fetchWeeklyCreditUsage = async (
+  account: CodexInspectionAccount,
+  settings: CodexInspectionSettings,
+  weeklyWindow: CodexUsageWindow | null,
+  headers: Record<string, string>,
+  requestConfig: AxiosRequestConfig
+): Promise<number | null> => {
+  if (!account.authIndex) return null;
+  const { startDate, endDate } = getCurrentWeekRange(weeklyWindow);
+  const url = `https://chatgpt.com/backend-api/wham/analytics/daily-workspace-usage-counts?start_date=${startDate}&end_date=${endDate}&group_by=day`;
+  const result = await withRetry(settings.retries, () =>
+    apiCallApi.request(
+      {
+        authIndex: account.authIndex ?? undefined,
+        method: 'GET',
+        url,
+        header: headers,
+      },
+      requestConfig
+    )
+  );
+  if (!result.hasStatusCode || result.statusCode < 200 || result.statusCode >= 300) return null;
+  return extractAnalyticsCredits(result.body ?? result.bodyText);
+};
+
+const buildWeeklyDollarEstimate = (usedCredits: number | null, usedPercent: number | null) => {
+  const usedUsd = creditsToUsd(usedCredits);
+  if (usedUsd === null || usedPercent === null || usedPercent <= 0) {
+    return {
+      weeklyUsedCredits: usedCredits,
+      weeklyUsedUsd: usedUsd,
+      weeklyLimitUsd: null,
+      weeklyRemainingUsd: null,
+    };
+  }
+  const limitUsd = usedUsd / (usedPercent / 100);
+  return {
+    weeklyUsedCredits: usedCredits,
+    weeklyUsedUsd: usedUsd,
+    weeklyLimitUsd: limitUsd,
+    weeklyRemainingUsd: Math.max(0, limitUsd - usedUsd),
+  };
+};
+
+const emptyWeeklyDollarEstimate = buildWeeklyDollarEstimate(null, null);
 
 type CodexInspectionDecision = Pick<
   CodexInspectionResultItem,
@@ -635,6 +732,7 @@ const inspectSingleAccount = async (
       actionReason: '缺少 auth_index，保留账号',
       statusCode: null,
       usedPercent: null,
+      ...emptyWeeklyDollarEstimate,
       isQuota: false,
       error: '缺少 auth_index',
     };
@@ -668,6 +766,7 @@ const inspectSingleAccount = async (
         actionReason: '探测响应缺少 status_code，保留账号',
         statusCode: null,
         usedPercent: null,
+        ...emptyWeeklyDollarEstimate,
         isQuota: false,
         error: '响应缺少 status_code',
       };
@@ -675,6 +774,7 @@ const inspectSingleAccount = async (
 
     const payload = parseCodexUsagePayload(result.body ?? result.bodyText);
     const rateLimit = payload?.rate_limit ?? payload?.rateLimit ?? null;
+    const { weeklyWindow } = pickClassifiedWindows(rateLimit);
     const usedPercent = deriveUsedPercent(rateLimit);
     const bodyText = result.bodyText.toLowerCase();
     const isQuota =
@@ -700,9 +800,19 @@ const inspectSingleAccount = async (
             ? 'success'
             : 'info';
     const percentText = decision.usedPercent === null ? '--' : `${decision.usedPercent.toFixed(1)}%`;
+    const weeklyUsedCredits = await fetchWeeklyCreditUsage(
+      account,
+      settings,
+      weeklyWindow,
+      headers,
+      requestConfig
+    ).catch(() => null);
+    const weeklyDollarEstimate = buildWeeklyDollarEstimate(weeklyUsedCredits, decision.usedPercent);
+    const remainingText =
+      weeklyDollarEstimate.weeklyRemainingUsd === null ? '--' : `$${weeklyDollarEstimate.weeklyRemainingUsd.toFixed(2)}`;
     onLog?.(
       successLevel,
-      `${account.displayAccount} -> ${decision.action} (HTTP ${result.statusCode} · 已用 ${percentText})`
+      `${account.displayAccount} -> ${decision.action} (HTTP ${result.statusCode} · 已用 ${percentText} · 周剩余 ${remainingText})`
     );
 
     return {
@@ -711,6 +821,7 @@ const inspectSingleAccount = async (
       actionReason: decision.actionReason,
       statusCode: result.statusCode,
       usedPercent: decision.usedPercent,
+      ...weeklyDollarEstimate,
       isQuota: decision.isQuota,
       error: '',
     };
@@ -723,6 +834,7 @@ const inspectSingleAccount = async (
       actionReason: '探测异常，保留账号',
       statusCode: null,
       usedPercent: null,
+      ...emptyWeeklyDollarEstimate,
       isQuota: false,
       error: errorMessage,
     };
@@ -965,6 +1077,7 @@ export const createCodexInspectionSession = ({
             actionReason: '探测异常，保留账号',
             statusCode: null,
             usedPercent: null,
+            ...emptyWeeklyDollarEstimate,
             isQuota: false,
             error: error instanceof Error ? error.message : String(error || '探测失败'),
           });

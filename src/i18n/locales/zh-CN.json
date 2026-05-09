@@ -1359,7 +1359,9 @@
     "no_filtered_data": "没有匹配当前搜索条件的调用数据。",
     "source": "来源",
     "calls": "调用数",
-    "log_rows": "日志行"
+    "log_rows": "日志行",
+    "codex_inspection_progress_eta": "预计 {{time}} 完成，剩余约 {{remaining}}",
+    "codex_inspection_progress_eta_calculating": "正在估算预计完成时间..."
   },
   "logs": {
     "title": "日志查看",

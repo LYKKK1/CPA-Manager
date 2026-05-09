@@ -219,6 +219,13 @@
   color: var(--inspect-amber);
 }
 
+.progressEta {
+  color: var(--inspect-ink);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
 .summaryGrid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

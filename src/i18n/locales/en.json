@@ -1358,7 +1358,9 @@
     "no_filtered_data": "No calls matched the current search filter.",
     "source": "Source",
     "calls": "Calls",
-    "log_rows": "Log Rows"
+    "log_rows": "Log Rows",
+    "codex_inspection_progress_eta": "Estimated completion at {{time}}, about {{remaining}} remaining",
+    "codex_inspection_progress_eta_calculating": "Estimating completion time..."
   },
   "logs": {
     "title": "Logs Viewer",

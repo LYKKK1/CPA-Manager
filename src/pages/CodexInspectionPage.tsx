@@ -289,6 +289,16 @@ const createIdleProgressSnapshot = (): CodexInspectionProgressSnapshot => ({
   updatedAt: Date.now(),
 });
 
+const formatEtaDuration = (milliseconds: number) => {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}小时 ${minutes}分钟`;
+  if (minutes > 0) return `${minutes}分钟 ${seconds}秒`;
+  return `${seconds}秒`;
+};
+
 export function CodexInspectionPage() {
   const { t, i18n } = useTranslation();
   const config = useConfigStore((state) => state.config);
@@ -312,6 +322,8 @@ export function CodexInspectionPage() {
   const [result, setResult] = useState<CodexInspectionRunResult | null>(null);
   const [executing, setExecuting] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<InspectionHistoryEntry[]>(loadInspectionHistoryEntries);
+  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
+  const [progressNow, setProgressNow] = useState(Date.now());
   const logCounterRef = useRef(0);
   const sessionRef = useRef<CodexInspectionSession | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
@@ -394,6 +406,12 @@ export function CodexInspectionPage() {
   }, [logs, logsCollapsed]);
 
   useEffect(() => {
+    if (runStatus !== 'running' && runStatus !== 'paused') return undefined;
+    const timer = window.setInterval(() => setProgressNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [runStatus]);
+
+  useEffect(() => {
     return () => {
       activeSessionIdRef.current = null;
       sessionRef.current?.stop();
@@ -414,6 +432,7 @@ export function CodexInspectionPage() {
           prependHistoryEntries(nextIssueEntries);
           setProgress(session.getProgress());
           setRunStatus('success');
+          setRunStartedAt(null);
           setLogsCollapsed(true);
           if (autoExecuteOnComplete) {
             if (nextAutoExecutableResults.length > 0 && executeItemsRef.current) {
@@ -441,6 +460,7 @@ export function CodexInspectionPage() {
           if (activeSessionIdRef.current !== sessionId) return;
           if (isCodexInspectionStoppedError(error)) {
             setRunStatus('idle');
+            setRunStartedAt(null);
             setProgress(createIdleProgressSnapshot());
             return;
           }
@@ -482,6 +502,8 @@ export function CodexInspectionPage() {
 
       setResult(null);
       setRunStatus('running');
+      setRunStartedAt(Date.now());
+      setProgressNow(Date.now());
       setLogsCollapsed(false);
 
       const session = createCodexInspectionSession({
@@ -548,6 +570,7 @@ export function CodexInspectionPage() {
     sessionRef.current = null;
     currentSession.stop();
     setRunStatus('idle');
+    setRunStartedAt(null);
     setProgress(createIdleProgressSnapshot());
     setResult(null);
     setLogsCollapsed(false);
@@ -748,6 +771,28 @@ export function CodexInspectionPage() {
           percent: progress.percent,
         })
       : t('monitoring.codex_inspection_progress_idle');
+
+  const progressEtaLabel = useMemo(() => {
+    if ((runStatus !== 'running' && runStatus !== 'paused') || !runStartedAt || progress.total <= 0) {
+      return '';
+    }
+    if (progress.completed >= progress.total) return '';
+    if (progress.completed <= 0) return t('monitoring.codex_inspection_progress_eta_calculating');
+
+    const elapsed = Math.max(1, progressNow - runStartedAt);
+    const average = elapsed / progress.completed;
+    const remaining = Math.max(0, progress.total - progress.completed) * average;
+    const eta = new Date(progressNow + remaining).toLocaleTimeString(i18n.language, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+
+    return t('monitoring.codex_inspection_progress_eta', {
+      time: eta,
+      remaining: formatEtaDuration(remaining),
+    });
+  }, [i18n.language, progress.completed, progress.total, progressNow, runStartedAt, runStatus, t]);
 
   const formatHistoryTitle = useCallback(
     (entry: InspectionHistoryEntry) => {
@@ -962,6 +1007,7 @@ export function CodexInspectionPage() {
             <span>{progressLabel}</span>
             {runStatus === 'paused' ? <strong>{t('monitoring.codex_inspection_paused')}</strong> : null}
           </div>
+          {progressEtaLabel ? <div className={styles.progressEta}>{progressEtaLabel}</div> : null}
         </div>
       </Card>
 

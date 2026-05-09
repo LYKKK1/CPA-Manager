@@ -1349,7 +1349,9 @@
     "no_filtered_data": "Текущий поисковый фильтр ничего не нашёл.",
     "source": "Источник",
     "calls": "Вызовы",
-    "log_rows": "Log Rows"
+    "log_rows": "Log Rows",
+    "codex_inspection_progress_eta": "Ожидаемое завершение в {{time}}, осталось около {{remaining}}",
+    "codex_inspection_progress_eta_calculating": "Оцениваем время завершения..."
   },
   "logs": {
     "title": "Просмотр журналов",
